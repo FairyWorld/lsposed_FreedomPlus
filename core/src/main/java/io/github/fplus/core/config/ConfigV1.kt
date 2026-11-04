@@ -276,6 +276,38 @@ class ConfigV1 private constructor() {
             mmkv.putBoolean("is32BitTips", value)
         }
 
+    var isSelfDiscipline: Boolean = false
+        get() {
+            field = mmkv.getBoolean("isSelfDiscipline", false)
+            return field
+        }
+        set(value) {
+            field = value
+            mmkv.putBoolean("isSelfDiscipline", value)
+        }
+
+    var selfDisciplineValue: List<Int> = listOf(120, 30)
+        get() {
+            val raw = mmkv.getString("selfDisciplineValue", "120, 30") ?: "120, 30"
+            val parsed = raw.split(",").mapNotNull { it.trim().toIntOrNull() }.filter { it >= 0 }
+            field = if (parsed.size == 2) parsed else listOf(120, 30)
+            return field
+        }
+        set(value) {
+            field = value
+            mmkv.putString("selfDisciplineValue", value.joinToString(", "))
+        }
+
+    var selfDisciplineBlockType: Int = 0
+        get() {
+            field = mmkv.getInt("selfDisciplineBlockType", 0)
+            return field
+        }
+        set(value) {
+            field = value
+            mmkv.putInt("selfDisciplineBlockType", value)
+        }
+
     var dexkitCache: JSONObject = JSONObject()
         get() {
             return mmkv.getString("dexkitCache", "")!!.parseJSON()

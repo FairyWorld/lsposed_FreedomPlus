@@ -20,6 +20,18 @@ class HActivity : BaseHook() {
         return Activity::class.java
     }
 
+    @OnBefore("onResume")
+    fun onResumeBefore(params: MethodParam) {
+        hookBlockRunning(params) {
+            singleLaunchMain {
+                val activity = thisObject as Activity
+                DouYinMain.selfDisciplineHelper?.onAppForeground(activity)
+            }
+        }.onFailure {
+            XplerLog.e(it)
+        }
+    }
+
     @OnAfter("onWindowFocusChanged")
     fun onWindowFocusChangedAfter(params: MethodParam, boolean: Boolean) {
         hookBlockRunning(params) {

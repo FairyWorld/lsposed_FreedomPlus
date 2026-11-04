@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.Checkbox
 import androidx.compose.material.CircularProgressIndicator
@@ -49,6 +50,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -255,6 +257,7 @@ class FreedomSettingActivity : XplerActivity() {
             item { DialogFilterItem() }
             item { VideoFilterItem() }
             item { ImmersiveItem() }
+            item { SelfDisciplineItem() }
         }
     }
 
@@ -667,6 +670,105 @@ class FreedomSettingActivity : XplerActivity() {
                             isHideNavigateBar.value = it
                         },
                     )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SelfDisciplineItem() {
+        var showSettingDialog by remember { mutableStateOf(false) }
+
+        SwitchItem(
+            text = "自律",
+            subtext = "限制抖音每日/每小时使用时长, 点击设置",
+            checked = model.isSelfDiscipline.observeAsState(false),
+            onClick = {
+                showSettingDialog = true
+            },
+            onCheckedChange = {
+                model.changeIsSelfDiscipline(it)
+                showRestartAppDialog.value = true
+            },
+        )
+
+        if (showSettingDialog) {
+            val value = model.selfDisciplineValue.observeAsState(listOf(120, 30)).value
+            val blockType by model.selfDisciplineBlockType.observeAsState(0)
+            var dayLimit by remember { mutableStateOf("${value.getOrElse(0) { 120 }}") }
+            var hourLimit by remember { mutableStateOf("${value.getOrElse(1) { 30 }}") }
+            var directExit by remember { mutableStateOf((blockType ?: 0) == 1) }
+
+            FMessageDialog(
+                title = "自律设置",
+                cancel = "取消",
+                confirm = "确定",
+                onCancel = {
+                    showSettingDialog = false
+                },
+                onConfirm = {
+                    val intDay = dayLimit.toIntOrNull() ?: -1
+                    val intHour = hourLimit.toIntOrNull() ?: -1
+                    if (intDay < 0 || intHour < 0) {
+                        KToastUtils.show(application, "请输入正确的分钟数")
+                        return@FMessageDialog
+                    }
+                    if (intDay == 0 && intHour == 0) {
+                        KToastUtils.show(application, "每日和每小时限制不能同时为0")
+                        return@FMessageDialog
+                    }
+                    if (intDay > 1440) {
+                        KToastUtils.show(application, "每日限制不能超过1440分钟")
+                        return@FMessageDialog
+                    }
+                    if (intHour > 60) {
+                        KToastUtils.show(application, "每小时限制不能超过60分钟")
+                        return@FMessageDialog
+                    }
+                    showSettingDialog = false
+                    model.setSelfDisciplineValue(listOf(intDay, intHour))
+                    model.setSelfDisciplineBlockType(if (directExit) 1 else 0)
+                    KToastUtils.show(application, "下次启动生效!")
+                },
+            ) {
+                Column {
+                    Text(
+                        text = "每日限制(分钟, 0=不限)",
+                        style = MaterialTheme.typography.body2,
+                    )
+                    Spacer(modifier = Modifier.padding(vertical = 4.dp))
+                    TextField(
+                        value = dayLimit,
+                        onValueChange = { dayLimit = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
+                    )
+                    Spacer(modifier = Modifier.padding(vertical = 12.dp))
+                    Text(
+                        text = "每小时限制(分钟, 0=不限)",
+                        style = MaterialTheme.typography.body2,
+                    )
+                    Spacer(modifier = Modifier.padding(vertical = 4.dp))
+                    TextField(
+                        value = hourLimit,
+                        onValueChange = { hourLimit = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
+                    )
+                    Spacer(modifier = Modifier.padding(vertical = 12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = directExit,
+                            onCheckedChange = { directExit = it },
+                        )
+                        Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+                        Text(
+                            text = "到达限制后直接退出应用",
+                            style = MaterialTheme.typography.body1,
+                        )
+                    }
                 }
             }
         }

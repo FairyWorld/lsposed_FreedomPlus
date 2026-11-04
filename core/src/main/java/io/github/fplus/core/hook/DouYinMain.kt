@@ -13,6 +13,7 @@ import com.freegang.ktutils.log.KLogCat
 import io.github.fplus.Constant
 import io.github.fplus.core.config.ConfigV1
 import io.github.fplus.core.helper.DexkitBuilder
+import io.github.fplus.core.helper.SelfDisciplineHelper
 import io.github.fplus.plugin.injectRes
 import io.github.fplus.plugin.proxy.v1.PluginBridge
 import io.github.xpler.core.XplerLog
@@ -43,6 +44,9 @@ class DouYinMain(private val app: Application) {
             val className = "${Constant.modulePackage}.activity.ErrorActivity"
             intent.setClassName(Constant.modulePackage, className)
             KAppCrashUtils.init(app, "抖音异常退出!", intent)
+
+            // 自律功能
+            initSelfDiscipline(app)
 
             // search and hook
             DexkitBuilder.running(
@@ -104,5 +108,17 @@ class DouYinMain(private val app: Application) {
         ConfigV1.initialize(app) { _ ->
             System.load(libMmkv.absolutePath)
         }
+    }
+
+    /** 自律功能: 开启时启动前台计时 */
+    private fun initSelfDiscipline(app: Application) {
+        if (!ConfigV1.get().isSelfDiscipline) return
+        selfDisciplineHelper = SelfDisciplineHelper(app)
+        selfDisciplineHelper?.start()
+    }
+
+    companion object {
+        @Volatile
+        var selfDisciplineHelper: SelfDisciplineHelper? = null
     }
 }

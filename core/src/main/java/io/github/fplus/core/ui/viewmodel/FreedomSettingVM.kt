@@ -79,6 +79,14 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _longPressMode = MutableLiveData(false)
     val longPressMode: LiveData<Boolean> = _longPressMode
 
+    private var _isSelfDiscipline = MutableLiveData(false)
+    val isSelfDiscipline: LiveData<Boolean> = _isSelfDiscipline
+
+    private var _selfDisciplineValue = MutableLiveData(listOf(120, 30))
+    val selfDisciplineValue: LiveData<List<Int>> = _selfDisciplineValue
+
+    private var _selfDisciplineBlockType = MutableLiveData(0)
+    val selfDisciplineBlockType: LiveData<Int> = _selfDisciplineBlockType
 
     // 检查版本更新
     fun checkVersion() {
@@ -111,6 +119,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setVideoFilterKeywords(config.videoFilterKeywords)
             changeIsImmersive(config.isImmersive)
             setSystemControllerValue(config.systemControllerValue)
+            changeIsSelfDiscipline(config.isSelfDiscipline)
+            setSelfDisciplineValue(config.selfDisciplineValue)
+            setSelfDisciplineBlockType(config.selfDisciplineBlockType)
         }
     }
 
@@ -208,6 +219,24 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setSystemControllerValue(value: List<Boolean>) {
         _systemControllerValue.value = value
         config.systemControllerValue = value
+    }
+
+    // 自律
+    fun changeIsSelfDiscipline(value: Boolean) {
+        _isSelfDiscipline.value = value
+        config.isSelfDiscipline = value
+    }
+
+    // 自律时长限制(每日分钟, 每小时分钟)
+    fun setSelfDisciplineValue(value: List<Int>) {
+        _selfDisciplineValue.value = value
+        config.selfDisciplineValue = value
+    }
+
+    // 自律拦截方式(0=遮罩, 1=直接退出)
+    fun setSelfDisciplineBlockType(value: Int) {
+        _selfDisciplineBlockType.value = value
+        config.selfDisciplineBlockType = value
     }
 
     // 清爽模式弹窗响应模式
