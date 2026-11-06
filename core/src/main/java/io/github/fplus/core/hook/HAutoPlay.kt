@@ -209,8 +209,17 @@ object AutoPlayEngine {
     /** 两次翻页之间的最小间隔，避免回调抖动导致连续翻页 */
     private const val ADVANCE_INTERVAL_MS = 1_500L
 
-    /** 轮询播放进度的心跳间隔 */
+    /** 平时的轮询间隔 */
     private const val HEARTBEAT_MS = 500L
+
+    /** 临近片尾时加密轮询，避免错过结尾而看到下一轮循环的开头 */
+    private const val HEARTBEAT_NEAR_END_MS = 150L
+
+    /** 剩余时长小于该值就提前翻页，让切换发生在片尾之前 */
+    private const val EARLY_ADVANCE_MS = 700L
+
+    /** 剩余时长小于该值切换到加密轮询 */
+    private const val NEAR_END_WINDOW_MS = 3_000L
 
     /** 引擎状态多久没更新就丢弃 */
     private const val STATE_TTL_MS = 30_000L
@@ -253,12 +262,17 @@ object AutoPlayEngine {
 
     // ------------------------------------------------------------------ 心跳
 
+    /** 当前播放的引擎是否即将结束（决定下一次轮询的间隔） */
+    @Volatile
+    private var nearEnd = false
+
     private val heartbeat = object : Runnable {
         override fun run() {
             if (ConfigV1.get().isAutoPlay) {
                 runCatching { sampleEngine() }.onFailure { XplerLog.e(it) }
             }
-            handler.postDelayed(this, HEARTBEAT_MS)
+            val delay = if (nearEnd) HEARTBEAT_NEAR_END_MS else HEARTBEAT_MS
+            handler.postDelayed(this, delay)
         }
     }
 
@@ -277,6 +291,7 @@ object AutoPlayEngine {
         val activity = activityRef?.get() ?: return
         if (activity.isFinishing || activity.isDestroyed) return
         sampling = true
+        var approachingEnd = false
         try {
             for (engine in EngineTracker.candidates()) {
                 val duration = invokeLong(engine, "getDuration", "getVideoDuration")
@@ -286,10 +301,12 @@ object AutoPlayEngine {
                 if (duration == null || position == null || duration <= 0L || position < 0L) {
                     continue
                 }
+                if (duration - position in 0..NEAR_END_WINDOW_MS) approachingEnd = true
                 onEngineProgress(engine, position, duration)
             }
             cleanupStates()
         } finally {
+            nearEnd = approachingEnd
             sampling = false
         }
     }
@@ -370,8 +387,15 @@ object AutoPlayEngine {
 
         if (current > state.maxPosition) state.maxPosition = current
 
-        // 1. 循环播放：上一次采样还在片尾附近，这一次已经回到片头 = 本条播完。
-        //    不依赖"布防标记"，所以视频从哪一秒开始被采样都能在第一次循环命中。
+        // 0. 提前翻页：进度在推进且只剩不到 EARLY_ADVANCE_MS，直接切。
+        //    这样滑动动作发生在片尾之前，用户看不到下一轮循环的开头。
+        val advancing = current > state.lastPosition
+        if (advancing && duration >= 3_000L && current >= duration - EARLY_ADVANCE_MS) {
+            onCompleted("接近片尾 $current/$duration")
+            return
+        }
+
+        // 1. 循环播放（兜底）：上一次采样还在片尾附近，这一次已经回到片头。
         if (state.lastPosition >= duration - 1_500L && current <= 1_500L) {
             onCompleted("循环回到片头 $current/$duration max=${state.maxPosition}")
             return
