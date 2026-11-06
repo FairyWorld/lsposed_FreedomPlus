@@ -293,6 +293,7 @@ object FeedPanelTracker {
     }
 }
 
+
 object AutoPlayEngine {
     private const val TAG = "AutoPlay"
 
@@ -302,30 +303,40 @@ object AutoPlayEngine {
     /** 轮询播放进度的心跳间隔 */
     private const val HEARTBEAT_MS = 400L
 
+    /** 引擎状态多久没更新就丢弃 */
+    private const val STATE_TTL_MS = 30_000L
+
     private val handler = Handler(Looper.getMainLooper())
 
     private var activityRef: WeakReference<Activity>? = null
 
-    private var lastAid: String? = null
-    private var lastPosition = 0L
-    private var lastDuration = 0L
-    private var maxPosition = 0L
-    private var armed = false
-    private var endStallSince = 0L
     private var lastAdvanceAt = 0L
     private var lastSwipeAt = 0L
     private var swiping = false
 
     private var sampling = false
     private var sampleLogAt = 0L
-    private var callbackLogAt = 0L
-    private var pagerLogAt = 0L
     private var failLogAt = 0L
     private var probeLogAt = 0L
     private var probeLogged = false
 
     /** 反射方法缓存 */
     private val methodCache = HashMap<String, Method?>()
+
+    /**
+     * 每条视频的判定状态, 按引擎实例隔离。
+     * 抖音会同时存在多个引擎(预加载/复用), 全局状态会被来回重置, 导致第一次循环漏判。
+     */
+    private data class EngineState(
+        var duration: Long = 0L,
+        var lastPosition: Long = -1L,
+        var maxPosition: Long = 0L,
+        var armed: Boolean = false,
+        var endStallSince: Long = 0L,
+        var lastSeen: Long = 0L,
+    )
+
+    private val states = java.util.IdentityHashMap<Any, EngineState>()
 
     // ------------------------------------------------------------------ 心跳
 
@@ -349,7 +360,7 @@ object AutoPlayEngine {
         XplerLog.i("$TAG: 前台 Activity ${activity.javaClass.name}")
     }
 
-    /** 轮询当前引擎的 位置/时长, 喂给判定逻辑 */
+    /** 轮询候选引擎的 位置/时长, 喂给判定逻辑 */
     @SuppressLint("DefaultLocale")
     private fun sampleEngine() {
         if (sampling) return
@@ -364,50 +375,36 @@ object AutoPlayEngine {
                 }
                 return
             }
-            var lastDiagnosed: Any? = null
             for (engine in engines) {
                 val duration = invokeLong(engine, "getDuration", "getVideoDuration")
                 val position = invokeLong(
                     engine, "getCurrentPlaybackTime", "getCurrentPosition", "getPlaybackTime"
                 )
                 if (duration == null || position == null || duration <= 0L || position < 0L) {
-                    lastDiagnosed = engine
                     continue
                 }
                 if (!probeLogged) {
                     probeLogged = true
                     XplerLog.i(
-                        "$TAG: 引擎轮询正常 ${engine.javaClass.simpleName} $position/$duration"
+                        "$TAG: 引擎轮询正常 ${engine.javaClass.name} $position/$duration"
                     )
                 }
-                onProgress(null, position, duration)
-                return
+                onEngineProgress(engine, position, duration)
             }
-
-            // 一个都取不到: 打一次方法清单, 方便按真实 API 修正
-            val now = SystemClock.uptimeMillis()
-            if (now - probeLogAt >= 3_000L) {
-                probeLogAt = now
-                val engine = lastDiagnosed
-                if (engine == null) {
-                    XplerLog.i("$TAG: 候选引擎都取不到有效时长/位置 ${engines.size} 个")
-                } else if (!probeLogged) {
-                    probeLogged = true
-                    val getters = engine.javaClass.declaredMethods
-                        .filter {
-                            val n = it.name.lowercase()
-                            n.contains("position") || n.contains("duration") ||
-                                n.contains("progress") || n.contains("time")
-                        }
-                        .take(40)
-                        .joinToString { "${it.name}(${it.parameterTypes.joinToString(",") { p -> p.simpleName }})" }
-                    XplerLog.i(
-                        "$TAG: ${engine.javaClass.simpleName} 取不到位置/时长, 相关方法=[$getters]"
-                    )
-                }
-            }
+            cleanupStates()
         } finally {
             sampling = false
+        }
+    }
+
+    private fun cleanupStates() {
+        val now = SystemClock.uptimeMillis()
+        val iterator = states.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.key == null || now - entry.value.lastSeen > STATE_TTL_MS) {
+                iterator.remove()
+            }
         }
     }
 
@@ -447,11 +444,12 @@ object AutoPlayEngine {
         onCompleted("完成回调 $source")
     }
 
+    @Volatile
+    private var callbackLogAt = 0L
+
     private fun onCompleted(reason: String) {
         if (advance(reason)) {
-            armed = false
-            lastPosition = 0L
-            endStallSince = 0L
+            resetAllStates()
         }
     }
 
@@ -459,7 +457,7 @@ object AutoPlayEngine {
 
     @SuppressLint("DefaultLocale")
     @Synchronized
-    fun onProgress(rawAid: String?, rawCurrent: Long, rawDuration: Long) {
+    private fun onEngineProgress(engine: Any, rawCurrent: Long, rawDuration: Long) {
         var current = rawCurrent
         var duration = rawDuration
         if (current > duration) {
@@ -467,78 +465,63 @@ object AutoPlayEngine {
             current = duration
             duration = swap
         }
-        if (current < 0L || duration < 1_000L) {
-            reset()
-            return
-        }
+        if (current < 0L || duration < 1_000L) return
 
         val now = SystemClock.uptimeMillis()
         val startWindow = (duration / 20).coerceIn(100L, 500L)
         val endWindow = (duration / 20).coerceIn(250L, 750L)
 
-        // 换到下一条视频(或时长变化)时重置基线
-        if (rawAid != lastAid || duration != lastDuration) {
-            lastAid = rawAid
-            lastDuration = duration
-            lastPosition = current
-            maxPosition = current
-            endStallSince = 0L
-            armed = current <= startWindow
+        val state = states[engine] ?: EngineState().also { states[engine] = it }
+        state.lastSeen = now
+
+        if (duration != state.duration) {
+            state.duration = duration
+            state.lastPosition = current
+            state.maxPosition = current
+            state.endStallSince = 0L
+            state.armed = current <= startWindow
             return
         }
 
-        val nowForLog = SystemClock.uptimeMillis()
-        if (nowForLog - sampleLogAt >= 2_000L) {
-            sampleLogAt = nowForLog
-            XplerLog.i("$TAG: 采样 $current/$duration max=$maxPosition armed=$armed")
+        if (current > state.maxPosition) state.maxPosition = current
+
+        if (now - sampleLogAt >= 2_000L) {
+            sampleLogAt = now
+            XplerLog.i(
+                "$TAG: 采样 ${engine.javaClass.simpleName.ifEmpty { "engine" }} " +
+                    "$current/$duration max=${state.maxPosition} armed=${state.armed}"
+            )
         }
 
-        if (current > maxPosition) maxPosition = current
-
-        // 1. 循环播放: 进度曾经到达片尾附近, 现在大幅回退(回到片头) = 本条播放结束
-        //    轮询间隔 400ms 可能正好跨过片尾窗口, 所以用"历史最远位置 + 大幅回退"判定,
-        //    而不是要求"上一次采样就在片尾"
-        val reachedEnd = maxPosition >= duration - 1_500L ||
-            lastPosition >= duration - endWindow
-        if (armed && reachedEnd && current + 1_000L < lastPosition) {
-            onCompleted("循环回到片头 $current/$duration max=$maxPosition")
+        // 1. 循环播放: 曾经到达片尾附近, 现在大幅回退(回到片头) = 本条播放结束
+        val reachedEnd = state.maxPosition >= duration - 1_500L ||
+            state.lastPosition >= duration - endWindow
+        if (state.armed && reachedEnd && current + 1_000L < state.lastPosition) {
+            onCompleted("循环回到片头 $current/$duration max=${state.maxPosition}")
             return
         }
 
         // 2. 非循环播放: 进度长时间停在片尾
         if (current >= duration - 500L) {
-            if (endStallSince == 0L) endStallSince = now
-            if (armed && now - endStallSince >= 800L) {
+            if (state.endStallSince == 0L) state.endStallSince = now
+            if (state.armed && now - state.endStallSince >= 800L) {
                 onCompleted("停在片尾 $current/$duration")
                 return
             }
         } else {
-            endStallSince = 0L
+            state.endStallSince = 0L
         }
 
         // 播放回到片头(新一轮循环)或进度突然回退时重新布防
-        if (current <= startWindow || current + 1_000L < lastPosition) {
-            armed = true
+        if (current <= startWindow || current + 1_000L < state.lastPosition) {
+            state.armed = true
         }
-        lastPosition = current
+        state.lastPosition = current
     }
 
-    /** 翻页后重置基线, 等下一次"接近片头"的采样重新布防 */
-    fun resetBaseline() {
-        lastPosition = 0L
-        lastDuration = 0L
-        maxPosition = 0L
-        armed = false
-        endStallSince = 0L
-    }
-
-    private fun reset() {
-        lastAid = null
-        lastPosition = 0L
-        lastDuration = 0L
-        maxPosition = 0L
-        armed = false
-        endStallSince = 0L
+    /** 翻页后清空所有引擎的判定状态, 让下一条重新布防 */
+    fun resetAllStates() {
+        states.clear()
     }
 
     // ------------------------------------------------------------------ 翻页
@@ -571,29 +554,24 @@ object AutoPlayEngine {
             return false
         }
 
-        val panelPager = FeedPanelTracker.pagerFor(decor)
-        var target: View = panelPager ?: findPager(decor) ?: decor
-        if (!target.isAttachedToWindow || target.width <= 0 || target.height <= 0) {
-            target = decor
-        }
-        if (panelPager == null) {
-            XplerLog.i("$TAG: 未取到信息流 panel 的 pager, 回退扫描结果")
-        }
-        if (!target.isAttachedToWindow || target.width <= 0 || target.height <= 0) {
-            logFail("目标视图不可用 ${target.javaClass.simpleName} ${target.width}x${target.height}")
+        // 只认信息流的竖版 pager: 根容器的 MainScrollableViewPager 等 pager 一旦被翻动,
+        // 会把整页切到"朋友/我", 表现出来就是莫名进入作者作品页。
+        val feedPager = FeedPanelTracker.pagerFor(decor) ?: findFeedPager(decor)
+        if (feedPager == null) {
+            logFail("未找到信息流 VerticalViewPager(候选=${listPagers(decor)})")
             return false
         }
+        val target: View = feedPager
 
         swiping = true
         lastSwipeAt = now
         lastAdvanceAt = now
-        endStallSince = 0L
-        val beforeItem = pagerItem(target)
         XplerLog.i(
             "$TAG: 切换到下一条($reason) target=${target.javaClass.simpleName} " +
                 "${target.width}x${target.height} activity=${activity.javaClass.simpleName}"
         )
 
+        val beforeItem = pagerItem(target)
         val width = target.width.toFloat()
         val height = target.height.toFloat()
         val x = width * 0.5f
@@ -636,27 +614,23 @@ object AutoPlayEngine {
                     dispatch(action, SystemClock.uptimeMillis(), y)
                     if (step == steps) {
                         XplerLog.i("$TAG: 手势已发出(上滑)")
-                        resetBaseline()
                     }
                 }.onFailure { XplerLog.e(it) }
             }, step * 22L)
         }
 
-        // 手势没生效时, 直接 setCurrentItem 兜底
+        // 手势没生效时, 只对信息流 pager 做 setCurrentItem 兜底
         handler.postDelayed({
             val afterItem = pagerItem(target)
             if (beforeItem != null && afterItem != null && afterItem == beforeItem) {
                 val next = beforeItem + 1
                 val ok = pagerSetItem(target, next)
-                XplerLog.i(
-                    "$TAG: 手势未生效, setCurrentItem($beforeItem -> $next) 结果=$ok"
-                )
+                XplerLog.i("$TAG: 手势未生效, setCurrentItem($beforeItem -> $next) 结果=$ok")
             }
         }, steps * 22L + 600L)
 
         // 手势发出后留一点冷却时间, 期间不再判定播放结束
         handler.postDelayed({ swiping = false }, steps * 22L + 600L)
-        // 看门狗: 万一回调丢了也不要把 swiping 永久卡住
         handler.postDelayed({ swiping = false }, 3_000L)
         return true
     }
@@ -682,27 +656,40 @@ object AutoPlayEngine {
         }.getOrNull()
     }
 
-    /** 在当前界面里找信息流的 ViewPager, 广告页的 WebView 会吞手势, 直接投给 pager 更稳 */
+    /** 信息流的竖版 ViewPager: 优先 VerticalViewPager, 其次竖向且接近满屏的非根 pager */
     @SuppressLint("DefaultLocale")
-    private fun findPager(root: View): View? {
+    private fun findFeedPager(root: View): View? {
         val candidates = ArrayList<View>()
         collectPagers(root, candidates)
-        if (candidates.isEmpty()) {
-            logFail("未找到 ViewPager, 使用 decorView")
-            return null
+        if (candidates.isEmpty()) return null
+
+        val vertical = candidates.filter {
+            it.javaClass.name.contains("VerticalViewPager", ignoreCase = true)
         }
-        val vertical = candidates.filter { it.height > it.width }
-        val pick = (if (vertical.isNotEmpty()) vertical else candidates)
-            .maxByOrNull { it.width.toLong() * it.height.toLong() }
-        val now = SystemClock.uptimeMillis()
-        if (now - pagerLogAt >= 2_000L) {
-            pagerLogAt = now
-            XplerLog.i(
-                "$TAG: pager 候选=${candidates.joinToString { it.javaClass.simpleName }} " +
-                    "选用=${pick?.javaClass?.simpleName}"
-            )
+        if (vertical.isNotEmpty()) {
+            return vertical.maxByOrNull { it.width.toLong() * it.height.toLong() }
+        }
+
+        val rootHeight = if (root.height > 0) root.height else 1
+        val fallback = candidates.filter { view ->
+            val name = view.javaClass.simpleName
+            !name.contains("MainScroll") &&
+                !name.contains("MainFlippable") &&
+                !name.contains("TabContainer") &&
+                view.height > view.width &&
+                view.height >= rootHeight * 3 / 4
+        }
+        val pick = fallback.maxByOrNull { it.width.toLong() * it.height.toLong() }
+        if (pick == null) {
+            logFail("pager 候选都不像信息流 pager: ${candidates.joinToString { it.javaClass.simpleName }}")
         }
         return pick
+    }
+
+    private fun listPagers(root: View): String {
+        val candidates = ArrayList<View>()
+        collectPagers(root, candidates)
+        return candidates.joinToString { it.javaClass.simpleName }
     }
 
     private fun pagerItem(view: View): Int? = runCatching {
