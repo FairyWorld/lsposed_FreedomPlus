@@ -44,6 +44,7 @@ class HAutoPlay : BaseHook() {
     override fun onInit() {
         XplerLog.i("AutoPlay: 初始化 v3 开关=${ConfigV1.get().isAutoPlay}")
         runCatching { EngineHooks.install(param.classLoader) }.onFailure { XplerLog.e(it) }
+        runCatching { FeedPanelTracker.install(param.classLoader) }.onFailure { XplerLog.e(it) }
         AutoPlayEngine.startHeartbeat()
     }
 }
@@ -218,6 +219,77 @@ object EngineTracker {
             engines.removeAll { it.get() == null || it.get() === engine }
         }
         if (activeRef?.get() === engine) activeRef = null
+    }
+}
+
+/**
+ * 信息流面板追踪: 从 BaseListFragmentPanel 实例的字段 f 取竖版 ViewPager
+ * (douyim 的 FeedContentTracker.currentPager 就是这么拿的)。
+ * 直接扫 ViewPager 容易选到底部 Tab 之类错误的 pager, 触摸投过去会被当成点击。
+ */
+object FeedPanelTracker {
+    private const val TAG = "AutoPlay"
+    private const val PANEL_CLASS = "com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel"
+
+    private var panelRef: WeakReference<Any>? = null
+    private var pagerField: java.lang.reflect.Field? = null
+    private var logged = false
+
+    fun install(classLoader: ClassLoader) {
+        val clazz = runCatching {
+            Class.forName(PANEL_CLASS, false, classLoader)
+        }.getOrNull()
+        if (clazz == null) {
+            XplerLog.i("$TAG: 信息流 panel 类不存在 $PANEL_CLASS")
+            return
+        }
+        pagerField = runCatching { clazz.getField("f") }.getOrNull()
+        XplerLog.i(
+            "$TAG: panel 类已找到, 字段 f=${pagerField != null} " +
+                "(${pagerField?.type?.name})"
+        )
+
+        runCatching {
+            XposedBridge.hookAllConstructors(clazz, object : XC_MethodHook() {
+                override fun afterHookedMethod(p: MethodHookParam) {
+                    runCatching {
+                        p.thisObject?.let {
+                            panelRef = WeakReference(it)
+                            if (!logged) {
+                                logged = true
+                                XplerLog.i("$TAG: 抓到信息流 panel ${it.javaClass.name}")
+                            }
+                        }
+                    }.onFailure { XplerLog.e(it) }
+                }
+            })
+        }.onFailure { XplerLog.e(it) }
+
+        // 页面切换回调(混淆名 y0(int)), 顺带刷新 panel 引用
+        for (name in listOf("y0", "y1")) {
+            val method = runCatching {
+                clazz.getDeclaredMethod(name, Int::class.javaPrimitiveType)
+            }.getOrNull() ?: continue
+            runCatching {
+                XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(p: MethodHookParam) {
+                        p.thisObject?.let { panelRef = WeakReference(it) }
+                    }
+                })
+                XplerLog.i("$TAG: panel 挂钩 ${method.name}(int) 页面切换回调")
+            }.onFailure { XplerLog.e(it) }
+        }
+    }
+
+    /** 当前信息流所在的 pager, 取不到返回 null */
+    fun pagerFor(decor: View): View? {
+        val panel = panelRef?.get() ?: return null
+        val field = pagerField ?: return null
+        val pager = runCatching { field.get(panel) }.getOrNull() as? View ?: return null
+        if (!pager.isAttachedToWindow) return null
+        if (pager.rootView !== decor) return null
+        if (pager.width <= 0 || pager.height <= 0) return null
+        return pager
     }
 }
 
@@ -499,9 +571,13 @@ object AutoPlayEngine {
             return false
         }
 
-        var target: View = findPager(decor) ?: decor
+        val panelPager = FeedPanelTracker.pagerFor(decor)
+        var target: View = panelPager ?: findPager(decor) ?: decor
         if (!target.isAttachedToWindow || target.width <= 0 || target.height <= 0) {
             target = decor
+        }
+        if (panelPager == null) {
+            XplerLog.i("$TAG: 未取到信息流 panel 的 pager, 回退扫描结果")
         }
         if (!target.isAttachedToWindow || target.width <= 0 || target.height <= 0) {
             logFail("目标视图不可用 ${target.javaClass.simpleName} ${target.width}x${target.height}")
