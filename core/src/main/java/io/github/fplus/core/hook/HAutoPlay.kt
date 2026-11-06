@@ -237,6 +237,7 @@ object AutoPlayEngine {
     private var lastAid: String? = null
     private var lastPosition = 0L
     private var lastDuration = 0L
+    private var maxPosition = 0L
     private var armed = false
     private var endStallSince = 0L
     private var lastAdvanceAt = 0L
@@ -408,6 +409,7 @@ object AutoPlayEngine {
             lastAid = rawAid
             lastDuration = duration
             lastPosition = current
+            maxPosition = current
             endStallSince = 0L
             armed = current <= startWindow
             return
@@ -416,12 +418,18 @@ object AutoPlayEngine {
         val nowForLog = SystemClock.uptimeMillis()
         if (nowForLog - sampleLogAt >= 2_000L) {
             sampleLogAt = nowForLog
-            XplerLog.i("$TAG: 采样 $current/$duration armed=$armed")
+            XplerLog.i("$TAG: 采样 $current/$duration max=$maxPosition armed=$armed")
         }
 
-        // 1. 循环播放: 上一步在片尾, 这一步回到片头 = 本条播放结束
-        if (armed && lastPosition >= duration - endWindow && current <= startWindow) {
-            onCompleted("循环回到片头 $current/$duration")
+        if (current > maxPosition) maxPosition = current
+
+        // 1. 循环播放: 进度曾经到达片尾附近, 现在大幅回退(回到片头) = 本条播放结束
+        //    轮询间隔 400ms 可能正好跨过片尾窗口, 所以用"历史最远位置 + 大幅回退"判定,
+        //    而不是要求"上一次采样就在片尾"
+        val reachedEnd = maxPosition >= duration - 1_500L ||
+            lastPosition >= duration - endWindow
+        if (armed && reachedEnd && current + 1_000L < lastPosition) {
+            onCompleted("循环回到片头 $current/$duration max=$maxPosition")
             return
         }
 
@@ -447,6 +455,7 @@ object AutoPlayEngine {
     fun resetBaseline() {
         lastPosition = 0L
         lastDuration = 0L
+        maxPosition = 0L
         armed = false
         endStallSince = 0L
     }
@@ -455,6 +464,7 @@ object AutoPlayEngine {
         lastAid = null
         lastPosition = 0L
         lastDuration = 0L
+        maxPosition = 0L
         armed = false
         endStallSince = 0L
     }
@@ -502,6 +512,7 @@ object AutoPlayEngine {
         lastSwipeAt = now
         lastAdvanceAt = now
         endStallSince = 0L
+        val beforeItem = pagerItem(target)
         XplerLog.i(
             "$TAG: 切换到下一条($reason) target=${target.javaClass.simpleName} " +
                 "${target.width}x${target.height} activity=${activity.javaClass.simpleName}"
@@ -555,6 +566,18 @@ object AutoPlayEngine {
             }, step * 22L)
         }
 
+        // 手势没生效时, 直接 setCurrentItem 兜底
+        handler.postDelayed({
+            val afterItem = pagerItem(target)
+            if (beforeItem != null && afterItem != null && afterItem == beforeItem) {
+                val next = beforeItem + 1
+                val ok = pagerSetItem(target, next)
+                XplerLog.i(
+                    "$TAG: 手势未生效, setCurrentItem($beforeItem -> $next) 结果=$ok"
+                )
+            }
+        }, steps * 22L + 600L)
+
         // 手势发出后留一点冷却时间, 期间不再判定播放结束
         handler.postDelayed({ swiping = false }, steps * 22L + 600L)
         // 看门狗: 万一回调丢了也不要把 swiping 永久卡住
@@ -605,6 +628,19 @@ object AutoPlayEngine {
         }
         return pick
     }
+
+    private fun pagerItem(view: View): Int? = runCatching {
+        view.javaClass.getMethod("getCurrentItem").invoke(view) as? Int
+    }.getOrNull()
+
+    private fun pagerSetItem(view: View, index: Int): Boolean = runCatching {
+        view.javaClass.getMethod(
+            "setCurrentItem",
+            Int::class.javaPrimitiveType,
+            Boolean::class.javaPrimitiveType,
+        ).invoke(view, index, true)
+        true
+    }.getOrDefault(false)
 
     private fun collectPagers(root: View, out: MutableList<View>) {
         if (root.javaClass.name.contains("ViewPager", ignoreCase = true)) {
