@@ -18,21 +18,21 @@ import io.github.xpler.core.entity.EmptyHook
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.util.Collections
+import java.util.WeakHashMap
 
 /**
  * 自动连播(自动播放下一条)
  *
- * 逻辑移植自 douyim(抖仙人) 的自动播放功能:
- * 1. 跟踪播放进度/完成回调, 得到当前视频的 进度/时长;
- * 2. 判定本条视频播放结束(播放完成回调, 或循环回到片头, 或停在片尾);
- * 3. 给信息流 ViewPager 合成一次上滑手势, 翻到下一条视频。
+ * 逻辑移植自 douyim(抖仙人):
+ * 1. 挂钩播放器引擎(TTVideoEngine / SimplifyPlayerImpl ...)的 play/pause/setListener/completion,
+ *    抓到当前活跃的引擎实例与完成回调;
+ * 2. 心跳轮询引擎的 getDuration()/getCurrentPlaybackTime() 得到 进度/时长;
+ * 3. 播完(完成回调, 或循环回到片头, 或停在片尾)后, 给信息流 ViewPager 合成上滑手势切下一条。
  *
- * 与 douyim 原实现 / 上一版的差异:
- * - 不再依赖注解精确匹配方法签名(参数个数/类型不符时 xpler 会静默跳过), 改为运行时枚举
- *   目标类的方法, 按方法名关键字(progress/complet/finish)动态挂钩, 实参按类型启发式解析;
- * - 播放完成回调为主路径, 进度推断为兜底;
- * - 每个环节都打日志(挂钩了哪些方法、采样值、翻页失败原因), 便于在 LSPosed 日志里定位;
- * - 翻页目标按"类名含 ViewPager + 竖向 + 面积最大"挑选, 找不到时退回 decorView。
+ * 为什么不再用 PlayerController:
+ * 实测(2026-11 版本) PlayerController 里已经没有 onPlaying/onResumePlay/onPausePlay/onPlayStop/
+ * onPlayProgressChange, 按名挂钩会全部落空; 引擎侧方法才稳定存在。
  */
 class HAutoPlay : BaseHook() {
     override fun setTargetClass(): Class<*> {
@@ -42,79 +42,182 @@ class HAutoPlay : BaseHook() {
     }
 
     override fun onInit() {
-        XplerLog.i(
-            "AutoPlay: 初始化 target=${targetClass.name} 开关=${ConfigV1.get().isAutoPlay}"
-        )
-        runCatching { hookPlayerCallbacks() }.onFailure { XplerLog.e(it) }
+        XplerLog.i("AutoPlay: 初始化 v3 开关=${ConfigV1.get().isAutoPlay}")
+        runCatching { EngineHooks.install(param.classLoader) }.onFailure { XplerLog.e(it) }
+        AutoPlayEngine.startHeartbeat()
     }
+}
 
-    /**
-     * 动态挂钩: 枚举候选类里所有"名字含 progress / complet / finish / playend"的方法,
-     * 命中即挂, 这样不依赖某个固定版本的签名。
-     */
-    private fun hookPlayerCallbacks() {
+/** 引擎侧挂钩: 抓引擎实例、抓完成回调 */
+object EngineHooks {
+    private const val TAG = "AutoPlay"
+
+    private val ENGINE_CLASSES = listOf(
+        "com.ss.ttvideoengine.TTVideoEngine",
+        "com.ss.ttvideoengine.TTVideoEngineImpl",
+        "com.ss.ttvideoengine.TTVideoEngineImplV2",
+        "com.ss.android.ugc.aweme.player.sdk.impl.SimplifyPlayerImpl",
+    )
+
+    private val hookedListenerClasses =
+        Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
+
+    fun install(classLoader: ClassLoader) {
         var total = 0
-        for (className in CANDIDATES) {
-            val clazz = runCatching {
-                Class.forName(className, false, param.classLoader)
-            }.getOrNull()
+        for (className in ENGINE_CLASSES) {
+            val clazz = runCatching { Class.forName(className, false, classLoader) }.getOrNull()
             if (clazz == null) {
-                XplerLog.i("AutoPlay: 类不存在 $className")
+                XplerLog.i("$TAG: 引擎类不存在 $className")
                 continue
             }
             var hooked = 0
             for (method in clazz.declaredMethods) {
-                if (Modifier.isAbstract(method.modifiers) || Modifier.isStatic(method.modifiers)) continue
-                val kind = classify(method.name) ?: continue
+                if (Modifier.isAbstract(method.modifiers) ||
+                    Modifier.isStatic(method.modifiers) ||
+                    Modifier.isNative(method.modifiers)
+                ) continue
+                val lower = method.name.lowercase()
+                val kind = when {
+                    isPlay(lower, method) -> KIND_PLAY
+                    isPause(lower, method) -> KIND_PAUSE
+                    lower.contains("completion") || lower.contains("completed") -> KIND_COMPLETE
+                    lower.startsWith("set") && lower.contains("listener") -> KIND_LISTENER
+                    else -> null
+                } ?: continue
+
                 runCatching {
                     XposedBridge.hookMethod(method, object : XC_MethodHook() {
                         override fun afterHookedMethod(p: MethodHookParam) {
                             runCatching {
-                                AutoPlayEngine.onPlayerCallback(kind, method, p.args)
+                                val self = p.thisObject
+                                when (kind) {
+                                    KIND_PLAY -> if (self != null) EngineTracker.onPlayed(self)
+                                    KIND_PAUSE -> if (self != null) EngineTracker.remember(self)
+                                    KIND_COMPLETE -> AutoPlayEngine.onCompletionCallback(
+                                        "${clazz.simpleName}#${method.name}"
+                                    )
+                                    KIND_LISTENER -> {
+                                        if (self != null) EngineTracker.remember(self)
+                                        for (arg in p.args) {
+                                            if (arg != null) hookListener(arg, method.name)
+                                        }
+                                    }
+                                    else -> Unit
+                                }
                             }.onFailure { XplerLog.e(it) }
                         }
                     })
                     hooked++
                     XplerLog.i(
-                        "AutoPlay: 挂钩 ${clazz.simpleName}#${method.name}(" +
+                        "$TAG: 引擎挂钩 ${clazz.simpleName}#${method.name}(" +
                             method.parameterTypes.joinToString(",") { it.simpleName } +
                             ") 类型=$kind"
                     )
                 }.onFailure { XplerLog.e(it) }
             }
             total += hooked
-            XplerLog.i("AutoPlay: ${clazz.simpleName} 挂钩 $hooked 个方法")
+            XplerLog.i("$TAG: ${clazz.simpleName} 引擎挂钩 $hooked 个方法")
             if (hooked == 0) {
-                // 没挂上时把方法名打出来, 方便按真实签名补齐
                 XplerLog.i(
-                    "AutoPlay: ${clazz.simpleName} 方法清单 " +
-                        clazz.declaredMethods.take(60).joinToString { it.name }
+                    "$TAG: ${clazz.simpleName} 方法清单 " +
+                        clazz.declaredMethods.take(80).joinToString { it.name }
                 )
             }
         }
-        XplerLog.i("AutoPlay: 共挂钩 $total 个播放回调")
+        XplerLog.i("$TAG: 引擎挂钩合计 $total 个方法")
     }
 
-    private fun classify(name: String): String? {
-        val lower = name.lowercase()
-        return when {
-            lower.contains("progress") -> KIND_PROGRESS
-            lower.contains("complet") || lower.contains("finish") ||
-                lower.contains("onplayend") || lower.contains("playover") -> KIND_COMPLETE
-            else -> null
+    private fun isPlay(name: String, method: Method): Boolean =
+        method.parameterCount == 0 &&
+            (name == "play" || name == "start" || name == "resume" || name == "startplay")
+
+    private fun isPause(name: String, method: Method): Boolean =
+        method.parameterCount == 0 &&
+            (name.startsWith("pause") || name == "stop" || name == "release" ||
+                name == "releaseasync")
+
+    /** 引擎设置 listener 的时候, 顺手把 listener 的 onCompletion 挂上 */
+    private fun hookListener(listener: Any, from: String) {
+        val type = listener.javaClass
+        synchronized(hookedListenerClasses) {
+            if (!hookedListenerClasses.add(type)) return
+        }
+        var hooked = 0
+        for (method in type.methods) {
+            if (Modifier.isAbstract(method.modifiers) || Modifier.isNative(method.modifiers)) continue
+            val lower = method.name.lowercase()
+            if (lower != "oncompletion" && lower != "oncompleted") continue
+            runCatching {
+                XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(p: MethodHookParam) {
+                        runCatching {
+                            AutoPlayEngine.onCompletionCallback("listener#${method.name}")
+                        }.onFailure { XplerLog.e(it) }
+                    }
+                })
+                hooked++
+                XplerLog.i("$TAG: listener 挂钩 ${type.name}#${method.name} (来自 $from)")
+            }.onFailure { XplerLog.e(it) }
+        }
+        XplerLog.i("$TAG: listener ${type.name} 挂钩 $hooked 个完成回调")
+    }
+
+    const val KIND_PLAY = "play"
+    const val KIND_PAUSE = "pause"
+    const val KIND_COMPLETE = "complete"
+    const val KIND_LISTENER = "listener"
+}
+
+/** 记录见过的引擎实例, 选出"最近在播"的那一个用于轮询 */
+object EngineTracker {
+    private const val TAG = "AutoPlay"
+
+    private val engines = Collections.synchronizedList(ArrayList<WeakReference<Any>>())
+
+    @Volatile
+    private var activeRef: WeakReference<Any>? = null
+
+    private var lastLogAt = 0L
+
+    fun onPlayed(engine: Any) {
+        activeRef = WeakReference(engine)
+        remember(engine)
+        val now = SystemClock.uptimeMillis()
+        if (now - lastLogAt >= 2_000L) {
+            lastLogAt = now
+            XplerLog.i("$TAG: 引擎开始播放 ${engine.javaClass.name}")
         }
     }
 
-    companion object {
-        const val KIND_PROGRESS = "progress"
-        const val KIND_COMPLETE = "complete"
+    fun remember(engine: Any) {
+        synchronized(engines) {
+            if (engines.none { it.get() === engine }) {
+                engines.add(WeakReference(engine))
+                while (engines.size > 4) engines.removeAt(0)
+            }
+        }
+    }
 
-        val CANDIDATES = listOf(
-            "com.ss.android.ugc.aweme.feed.controller.PlayerController",
-            "com.ss.android.ugc.aweme.player.sdk.impl.SimplifyPlayerImpl",
-            "com.ss.android.ugc.aweme.player.sdk.impl.VideoEnginePlayerImpl",
-            "com.ss.ttvideoengine.TTVideoEngine",
-        )
+    fun active(): Any? = candidates().firstOrNull()
+
+    /** 候选引擎: 最近在播的优先, 其次按记录顺序倒序 */
+    fun candidates(): List<Any> {
+        val result = ArrayList<Any>(4)
+        activeRef?.get()?.let { result.add(it) }
+        synchronized(engines) {
+            for (index in engines.indices.reversed()) {
+                val engine = engines[index].get() ?: continue
+                if (result.none { it === engine }) result.add(engine)
+            }
+        }
+        return result
+    }
+
+    fun forget(engine: Any) {
+        synchronized(engines) {
+            engines.removeAll { it.get() == null || it.get() === engine }
+        }
+        if (activeRef?.get() === engine) activeRef = null
     }
 }
 
@@ -123,6 +226,9 @@ object AutoPlayEngine {
 
     /** 两次翻页之间的最小间隔, 避免回调抖动导致连续翻页 */
     private const val ADVANCE_INTERVAL_MS = 1_500L
+
+    /** 轮询播放进度的心跳间隔 */
+    private const val HEARTBEAT_MS = 400L
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -137,61 +243,136 @@ object AutoPlayEngine {
     private var lastSwipeAt = 0L
     private var swiping = false
 
-    private var lastSampleLogAt = 0L
-    private var lastFailLogAt = 0L
+    private var sampling = false
+    private var sampleLogAt = 0L
+    private var callbackLogAt = 0L
+    private var pagerLogAt = 0L
+    private var failLogAt = 0L
+    private var probeLogAt = 0L
+    private var probeLogged = false
+
+    /** 反射方法缓存 */
+    private val methodCache = HashMap<String, Method?>()
+
+    // ------------------------------------------------------------------ 心跳
+
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            if (ConfigV1.get().isAutoPlay) {
+                runCatching { sampleEngine() }.onFailure { XplerLog.e(it) }
+            }
+            handler.postDelayed(this, HEARTBEAT_MS)
+        }
+    }
+
+    fun startHeartbeat() {
+        handler.removeCallbacks(heartbeat)
+        handler.post(heartbeat)
+        XplerLog.i("$TAG: 进度心跳已启动(${HEARTBEAT_MS}ms)")
+    }
 
     fun onActivityResumed(activity: Activity) {
         activityRef = WeakReference(activity)
         XplerLog.i("$TAG: 前台 Activity ${activity.javaClass.name}")
     }
 
+    /** 轮询当前引擎的 位置/时长, 喂给判定逻辑 */
+    @SuppressLint("DefaultLocale")
+    private fun sampleEngine() {
+        if (sampling) return
+        sampling = true
+        try {
+            val engines = EngineTracker.candidates()
+            if (engines.isEmpty()) {
+                val now = SystemClock.uptimeMillis()
+                if (now - probeLogAt >= 3_000L) {
+                    probeLogAt = now
+                    XplerLog.i("$TAG: 还没有抓到引擎实例")
+                }
+                return
+            }
+            var lastDiagnosed: Any? = null
+            for (engine in engines) {
+                val duration = invokeLong(engine, "getDuration", "getVideoDuration")
+                val position = invokeLong(
+                    engine, "getCurrentPlaybackTime", "getCurrentPosition", "getPlaybackTime"
+                )
+                if (duration == null || position == null || duration <= 0L || position < 0L) {
+                    lastDiagnosed = engine
+                    continue
+                }
+                if (!probeLogged) {
+                    probeLogged = true
+                    XplerLog.i(
+                        "$TAG: 引擎轮询正常 ${engine.javaClass.simpleName} $position/$duration"
+                    )
+                }
+                onProgress(null, position, duration)
+                return
+            }
+
+            // 一个都取不到: 打一次方法清单, 方便按真实 API 修正
+            val now = SystemClock.uptimeMillis()
+            if (now - probeLogAt >= 3_000L) {
+                probeLogAt = now
+                val engine = lastDiagnosed
+                if (engine == null) {
+                    XplerLog.i("$TAG: 候选引擎都取不到有效时长/位置 ${engines.size} 个")
+                } else if (!probeLogged) {
+                    probeLogged = true
+                    val getters = engine.javaClass.declaredMethods
+                        .filter {
+                            val n = it.name.lowercase()
+                            n.contains("position") || n.contains("duration") ||
+                                n.contains("progress") || n.contains("time")
+                        }
+                        .take(40)
+                        .joinToString { "${it.name}(${it.parameterTypes.joinToString(",") { p -> p.simpleName }})" }
+                    XplerLog.i(
+                        "$TAG: ${engine.javaClass.simpleName} 取不到位置/时长, 相关方法=[$getters]"
+                    )
+                }
+            }
+        } finally {
+            sampling = false
+        }
+    }
+
+    private fun invokeLong(target: Any, vararg names: String): Long? {
+        val clazz = target.javaClass
+        for (name in names) {
+            val cacheKey = "${clazz.name}#$name"
+            val method = if (methodCache.containsKey(cacheKey)) {
+                methodCache[cacheKey]
+            } else {
+                val found = runCatching {
+                    generateSequence<Class<*>>(clazz) { it.superclass }
+                        .mapNotNull { c -> runCatching { c.getDeclaredMethod(name) }.getOrNull() }
+                        .firstOrNull()
+                }.getOrNull()
+                methodCache[cacheKey] = found
+                found
+            } ?: continue
+            val value = runCatching {
+                method.isAccessible = true
+                method.invoke(target)
+            }.getOrNull() ?: continue
+            return (value as? Number)?.toLong()
+        }
+        return null
+    }
+
     // ------------------------------------------------------------------ 回调入口
 
-    fun onPlayerCallback(kind: String, method: Method, args: Array<Any?>) {
+    fun onCompletionCallback(source: String) {
+        val now = SystemClock.uptimeMillis()
+        if (now - callbackLogAt >= 1_000L) {
+            callbackLogAt = now
+            XplerLog.i("$TAG: 播放完成回调 $source")
+        }
         if (!ConfigV1.get().isAutoPlay) return
-
-        if (kind == HAutoPlay.KIND_COMPLETE) {
-            logThrottled(
-                1_000L,
-                "$TAG: 播放完成回调 ${method.name} args=${args.joinToString()}"
-            )
-            onCompleted("完成回调 ${method.name}")
-            return
-        }
-
-        val parsed = parseProgress(args) ?: return
-        onProgress(parsed.first, parsed.second, parsed.third)
+        onCompleted("完成回调 $source")
     }
-
-    /**
-     * 进度实参解析: 抖音不同版本可能传 (aid, current, duration) / (current, duration) /
-     * (progressRatio, current, duration), 统一归一成 (aid, currentMs, durationMs)。
-     */
-    private fun parseProgress(args: Array<Any?>): Triple<String?, Long, Long>? {
-        val numbers = args.mapNotNull { (it as? Number)?.toDouble() }
-        if (numbers.size < 2) return null
-        val aid = args.firstOrNull { it is String } as? String
-
-        var current: Double
-        var duration: Double
-        if (numbers.size >= 3 && numbers[0] in 0.0..1.5 && numbers[1] > 1_000.0) {
-            // (ratio, current, duration)
-            current = numbers[1]
-            duration = numbers[2]
-        } else {
-            current = numbers[0]
-            duration = numbers[1]
-        }
-        if (current > duration) {
-            val swap = current
-            current = duration
-            duration = swap
-        }
-        if (duration < 1_000.0) return null
-        return Triple(aid, current.toLong(), duration.toLong())
-    }
-
-    // ------------------------------------------------------------------ 判定
 
     private fun onCompleted(reason: String) {
         if (advance(reason)) {
@@ -200,6 +381,8 @@ object AutoPlayEngine {
             endStallSince = 0L
         }
     }
+
+    // ------------------------------------------------------------------ 判定
 
     @SuppressLint("DefaultLocale")
     @Synchronized
@@ -227,14 +410,14 @@ object AutoPlayEngine {
             lastPosition = current
             endStallSince = 0L
             armed = current <= startWindow
-            logThrottled(
-                1_000L,
-                "$TAG: 切换视频 aid=$rawAid $current/$duration armed=$armed"
-            )
             return
         }
 
-        logThrottled(2_000L, "$TAG: 采样 $current/$duration armed=$armed")
+        val nowForLog = SystemClock.uptimeMillis()
+        if (nowForLog - sampleLogAt >= 2_000L) {
+            sampleLogAt = nowForLog
+            XplerLog.i("$TAG: 采样 $current/$duration armed=$armed")
+        }
 
         // 1. 循环播放: 上一步在片尾, 这一步回到片头 = 本条播放结束
         if (armed && lastPosition >= duration - endWindow && current <= startWindow) {
@@ -258,6 +441,14 @@ object AutoPlayEngine {
             armed = true
         }
         lastPosition = current
+    }
+
+    /** 翻页后重置基线, 等下一次"接近片头"的采样重新布防 */
+    fun resetBaseline() {
+        lastPosition = 0L
+        lastDuration = 0L
+        armed = false
+        endStallSince = 0L
     }
 
     private fun reset() {
@@ -358,6 +549,7 @@ object AutoPlayEngine {
                     dispatch(action, SystemClock.uptimeMillis(), y)
                     if (step == steps) {
                         XplerLog.i("$TAG: 手势已发出(上滑)")
+                        resetBaseline()
                     }
                 }.onFailure { XplerLog.e(it) }
             }, step * 22L)
@@ -403,11 +595,14 @@ object AutoPlayEngine {
         val vertical = candidates.filter { it.height > it.width }
         val pick = (if (vertical.isNotEmpty()) vertical else candidates)
             .maxByOrNull { it.width.toLong() * it.height.toLong() }
-        logThrottled(
-            2_000L,
-            "$TAG: pager 候选=${candidates.joinToString { it.javaClass.simpleName }} " +
-                "选用=${pick?.javaClass?.simpleName}"
-        )
+        val now = SystemClock.uptimeMillis()
+        if (now - pagerLogAt >= 2_000L) {
+            pagerLogAt = now
+            XplerLog.i(
+                "$TAG: pager 候选=${candidates.joinToString { it.javaClass.simpleName }} " +
+                    "选用=${pick?.javaClass?.simpleName}"
+            )
+        }
         return pick
     }
 
@@ -425,17 +620,10 @@ object AutoPlayEngine {
 
     // ------------------------------------------------------------------ 日志
 
-    private fun logThrottled(intervalMs: Long, message: String) {
-        val now = SystemClock.uptimeMillis()
-        if (now - lastSampleLogAt < intervalMs) return
-        lastSampleLogAt = now
-        XplerLog.i(message)
-    }
-
     private fun logFail(reason: String) {
         val now = SystemClock.uptimeMillis()
-        if (now - lastFailLogAt < 1_000L) return
-        lastFailLogAt = now
+        if (now - failLogAt < 1_000L) return
+        failLogAt = now
         XplerLog.i("$TAG: 跳过翻页($reason)")
     }
 }
