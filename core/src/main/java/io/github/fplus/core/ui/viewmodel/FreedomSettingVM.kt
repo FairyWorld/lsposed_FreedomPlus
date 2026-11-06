@@ -79,6 +79,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _longPressMode = MutableLiveData(false)
     val longPressMode: LiveData<Boolean> = _longPressMode
 
+    private var _isAutoPlay = MutableLiveData(false)
+    val isAutoPlay: LiveData<Boolean> = _isAutoPlay
+
     private var _isSelfDiscipline = MutableLiveData(false)
     val isSelfDiscipline: LiveData<Boolean> = _isSelfDiscipline
 
@@ -119,6 +122,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setVideoFilterKeywords(config.videoFilterKeywords)
             changeIsImmersive(config.isImmersive)
             setSystemControllerValue(config.systemControllerValue)
+            changeIsAutoPlay(config.isAutoPlay)
             changeIsSelfDiscipline(config.isSelfDiscipline)
             setSelfDisciplineValue(config.selfDisciplineValue)
             setSelfDisciplineBlockType(config.selfDisciplineBlockType)
@@ -219,6 +223,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setSystemControllerValue(value: List<Boolean>) {
         _systemControllerValue.value = value
         config.systemControllerValue = value
+    }
+
+    // 自动连播(自动播放下一条)
+    fun changeIsAutoPlay(value: Boolean) {
+        _isAutoPlay.value = value
+        config.isAutoPlay = value
     }
 
     // 自律

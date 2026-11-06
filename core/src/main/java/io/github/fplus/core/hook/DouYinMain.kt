@@ -59,6 +59,7 @@ class DouYinMain(private val app: Application) {
                     HDetailActivity()
                     HDisallowInterceptRelativeLayout()
                     HPlayerController()
+                    HAutoPlay()
                     HPenetrateTouchRelativeLayout()
                     HDialog()
                 },

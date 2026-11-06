@@ -256,6 +256,7 @@ class FreedomSettingActivity : XplerActivity() {
             item { NeatModeItem() }
             item { DialogFilterItem() }
             item { VideoFilterItem() }
+            item { AutoPlayItem() }
             item { ImmersiveItem() }
             item { SelfDisciplineItem() }
         }
@@ -616,6 +617,18 @@ class FreedomSettingActivity : XplerActivity() {
                 }
             }
         }
+    }
+
+    @Composable
+    private fun AutoPlayItem() {
+        SwitchItem(
+            text = "自动连播",
+            subtext = "视频播放完毕后自动切换到下一条",
+            checked = model.isAutoPlay.observeAsState(false),
+            onCheckedChange = {
+                model.changeIsAutoPlay(it)
+            },
+        )
     }
 
     @Composable

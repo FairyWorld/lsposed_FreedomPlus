@@ -23,6 +23,11 @@ class HActivity : BaseHook() {
     @OnBefore("onResume")
     fun onResumeBefore(params: MethodParam) {
         hookBlockRunning(params) {
+            runCatching {
+                AutoPlayEngine.onActivityResumed(thisObject as Activity)
+            }.onFailure {
+                XplerLog.e(it)
+            }
             singleLaunchMain {
                 val activity = thisObject as Activity
                 DouYinMain.selfDisciplineHelper?.onAppForeground(activity)

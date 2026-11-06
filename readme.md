@@ -5,8 +5,9 @@
 > 2. 双击视频响应类型（点赞/打开评论区）
 > 3. 清爽模式（隐藏控件、移除贴纸、移除底部控制栏）
 > 4. 全屏沉浸式播放
+> 5. 自动连播（视频播放完毕后自动切换到下一条，逻辑移植自 douyim/抖仙人）
 >
-> 已移除：表情包/评论区保存、半透明防烧屏、Tab栏自定义隐藏、消息防撤回、视频过滤、弹窗过滤、自动连播、倍速播放、定时退出、WebDav同步、去插件化等功能。
+> 已移除：表情包/评论区保存、半透明防烧屏、Tab栏自定义隐藏、消息防撤回、视频过滤、弹窗过滤、倍速播放、定时退出、WebDav同步、去插件化等功能。
 
 [![](https://img.shields.io/github/v/release/GangJust/FreedomPlus?display_name=release)](https://github.com/GangJust/FreedomPlus/releases) [![](https://img.shields.io/github/downloads/GangJust/FreedomPlus/total?color=g)]() [![](https://img.shields.io/badge/telegram-freedom%2B-BB4E75)](https://t.me/FreedomPlugin)
 
@@ -24,6 +25,7 @@
 - 双击视频响应类型（可切换点赞/打开评论区）
 - 清爽模式（长按视频切换，隐藏大部分控件）
 - 全屏沉浸式播放
+- 自动连播（可开关）：跟踪播放进度，视频播放完毕（循环回到片头或停在片尾）后自动翻到下一条
 
 
 
