@@ -124,7 +124,15 @@ private object EngineTracker {
         synchronized(engines) {
             if (engines.none { it.get() === engine }) {
                 engines.add(WeakReference(engine))
-                while (engines.size > 4) engines.removeAt(0)
+                // 预加载引擎会不断登记, 淘汰时跳过正在播放的那个
+                while (engines.size > 8) {
+                    val index = engines.indexOfFirst {
+                        val candidate = it.get()
+                        candidate == null || candidate !== activeRef?.get()
+                    }
+                    if (index < 0) break
+                    engines.removeAt(index)
+                }
             }
         }
     }
@@ -222,6 +230,9 @@ object AutoPlayEngine {
 
     private var sampling = false
     private var failLogAt = 0L
+    private var retryCount = 0
+    private var retryToken = 0
+    private var lastCompletedAt = 0L
 
     /** 反射方法缓存 */
     private val methodCache = HashMap<String, Method?>()
@@ -234,7 +245,6 @@ object AutoPlayEngine {
         var duration: Long = 0L,
         var lastPosition: Long = -1L,
         var maxPosition: Long = 0L,
-        var armed: Boolean = false,
         var endStallSince: Long = 0L,
         var lastSeen: Long = 0L,
     )
@@ -324,7 +334,14 @@ object AutoPlayEngine {
     private fun onCompleted(reason: String) {
         if (advance(reason)) {
             states.clear()
+            retryCount = 0
+            return
         }
+        // 同一段播完只补一次；距离上次完成超过 5 秒视为新的一次
+        val now = SystemClock.uptimeMillis()
+        if (now - lastCompletedAt > 5_000L) retryCount = 0
+        lastCompletedAt = now
+        retryAdvance(reason)
     }
 
     @Synchronized
@@ -339,35 +356,31 @@ object AutoPlayEngine {
         if (current < 0L || duration < 1_000L) return
 
         val now = SystemClock.uptimeMillis()
-        val startWindow = (duration / 20).coerceIn(100L, 500L)
-        val endWindow = (duration / 20).coerceIn(250L, 750L)
-
         val state = states[engine] ?: EngineState().also { states[engine] = it }
         state.lastSeen = now
 
+        // 换了一条视频（时长变化）：重新记录基线
         if (duration != state.duration) {
             state.duration = duration
             state.lastPosition = current
             state.maxPosition = current
             state.endStallSince = 0L
-            state.armed = current <= startWindow
             return
         }
 
         if (current > state.maxPosition) state.maxPosition = current
 
-        // 1. 循环播放：曾经到达片尾附近，现在大幅回退（回到片头）= 本条播完
-        val reachedEnd = state.maxPosition >= duration - 1_500L ||
-            state.lastPosition >= duration - endWindow
-        if (state.armed && reachedEnd && current + 1_000L < state.lastPosition) {
+        // 1. 循环播放：上一次采样还在片尾附近，这一次已经回到片头 = 本条播完。
+        //    不依赖"布防标记"，所以视频从哪一秒开始被采样都能在第一次循环命中。
+        if (state.lastPosition >= duration - 1_500L && current <= 1_500L) {
             onCompleted("循环回到片头 $current/$duration max=${state.maxPosition}")
             return
         }
 
-        // 2. 非循环播放：进度长时间停在片尾
-        if (current >= duration - 500L) {
+        // 2. 非循环播放：播到片尾后停住不动
+        if (current >= duration - 500L && state.maxPosition >= duration - 1_500L) {
             if (state.endStallSince == 0L) state.endStallSince = now
-            if (state.armed && now - state.endStallSince >= 800L) {
+            if (now - state.endStallSince >= 800L) {
                 onCompleted("停在片尾 $current/$duration")
                 return
             }
@@ -375,11 +388,20 @@ object AutoPlayEngine {
             state.endStallSince = 0L
         }
 
-        // 播放回到片头（新一轮循环）或进度突然回退时重新布防
-        if (current <= startWindow || current + 1_000L < state.lastPosition) {
-            state.armed = true
-        }
         state.lastPosition = current
+    }
+
+    /** 翻页没成功时(冷却/目标未就绪)重试一次, 避免这一条就此丢掉 */
+    private fun retryAdvance(reason: String) {
+        if (retryCount >= 1) return
+        retryCount++
+        val token = ++retryToken
+        handler.postDelayed({
+            if (token == retryToken && advance(reason)) {
+                states.clear()
+                retryCount = 0
+            }
+        }, 1_200L)
     }
 
     // ------------------------------------------------------------------ 翻页
