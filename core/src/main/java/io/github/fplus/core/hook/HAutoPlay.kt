@@ -213,10 +213,14 @@ object AutoPlayEngine {
     private const val HEARTBEAT_MS = 500L
 
     /** 临近片尾时加密轮询，避免错过结尾而看到下一轮循环的开头 */
-    private const val HEARTBEAT_NEAR_END_MS = 150L
+    private const val HEARTBEAT_NEAR_END_MS = 120L
 
-    /** 剩余时长小于该值就提前翻页，让切换发生在片尾之前 */
-    private const val EARLY_ADVANCE_MS = 700L
+    /**
+     * 剩余时长小于该值就提前翻页。
+     * 取值只需覆盖"手势投递 + 页面切换动画"的启动时间(约 250ms)，
+     * 再留一点轮询误差余量；太大会明显吃掉片尾。
+     */
+    private const val EARLY_ADVANCE_MS = 300L
 
     /** 剩余时长小于该值切换到加密轮询 */
     private const val NEAR_END_WINDOW_MS = 3_000L
