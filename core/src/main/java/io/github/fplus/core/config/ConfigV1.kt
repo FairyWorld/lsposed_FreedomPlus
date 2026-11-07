@@ -276,10 +276,10 @@ class ConfigV1 private constructor() {
             mmkv.putBoolean("is32BitTips", value)
         }
 
-    /// 自动连播(视频播放完毕后自动切换到下一条)
-    var isAutoPlay: Boolean = false
+    /// 自动连播(视频播放完毕后自动切换到下一条), 默认开启
+    var isAutoPlay: Boolean = true
         get() {
-            field = mmkv.getBoolean("isAutoPlay", false)
+            field = mmkv.getBoolean("isAutoPlay", true)
             return field
         }
         set(value) {
