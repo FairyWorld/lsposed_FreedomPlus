@@ -88,3 +88,19 @@
 
 # 模块状态
 -keep class io.github.fplus.HookInit
+# --------------------------------------------模块自身--------------------------------------------#
+# 模块靠注解 + 类名/方法名反射注册 hook, 混淆后注册表与实际类名对不上会静默失效,
+# 因此模块自身代码一律保留原名与成员(仍保留资源压缩与部分优化)。
+-keep class io.github.fplus.** { *; }
+-keepclassmembers class io.github.fplus.** { *; }
+-keep interface io.github.fplus.** { *; }
+
+-keep class io.github.xpler.** { *; }
+-keepclassmembers class io.github.xpler.** { *; }
+-dontwarn io.github.xpler.**
+
+-keep class de.robv.android.xposed.** { *; }
+-keepclassmembers class de.robv.android.xposed.** { *; }
+
+# 注解必须保留(RuntimeVisibleAnnotations), 否则 hook 注册读不到
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,SourceFile,LineNumberTable

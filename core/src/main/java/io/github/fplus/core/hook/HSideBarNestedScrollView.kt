@@ -10,9 +10,6 @@ import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.view.children
 import com.freegang.extension.isDarkMode
 import com.freegang.extension.postRunning
-import com.freegang.ktutils.app.KAppUtils
-import com.freegang.ktutils.app.KToastUtils
-import io.github.fplus.Constant
 import io.github.fplus.core.R
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
@@ -88,16 +85,7 @@ class HSideBarNestedScrollView : BaseHook() {
             binding.freedomSettingTitle.setTextColor(textColorRes)
             binding.freedomSetting.setOnClickListener { view ->
                 val intent = Intent()
-                if (config.isDisablePlugin) {
-                    if (!KAppUtils.isAppInstalled(view.context, Constant.modulePackage)) {
-                        KToastUtils.show(it.context, "未安装Freedom+模块!")
-                        return@setOnClickListener
-                    }
-                    intent.setClassName(Constant.modulePackage, "io.github.fplus.activity.MainActivity")
-                    KToastUtils.show(it.context, "若设置未生效请尝试重启抖音!")
-                } else {
-                    intent.setClass(view.context, FreedomSettingActivity::class.java)
-                }
+                intent.setClass(view.context, FreedomSettingActivity::class.java)
 
                 intent.putExtra("isDark", view.context.isDarkMode)
                 val options = ActivityOptions.makeCustomAnimation(

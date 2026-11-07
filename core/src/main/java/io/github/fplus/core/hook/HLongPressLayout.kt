@@ -169,15 +169,8 @@ class HLongPressLayout : BaseHook() {
             items.add(0, if (!config.neatModeState) "清爽模式" else "普通模式")
         }
 
-        // if (config.isVideoFilter) {
-        //     items.add("过滤统计")
-        // }
-
         items.add("视频信息")
-
-        if (!config.isDisablePlugin) {
-            items.add("模块设置")
-        }
+        items.add("模块设置")
         return items
     }
 
@@ -218,54 +211,6 @@ class HLongPressLayout : BaseHook() {
                         content = msg,
                         singleButton = true,
                     )
-                }
-            }
-
-            "过滤统计" -> {
-                val builder = StringBuilder()
-                if (HVerticalViewPager.filterLiveCount > 0) {
-                    builder.append("直播过滤: ")
-                        .append(HVerticalViewPager.filterLiveCount)
-                        .append("\n")
-                }
-                if (HVerticalViewPager.filterImageCount > 0) {
-                    builder.append("图文过滤: ")
-                        .append(HVerticalViewPager.filterImageCount)
-                        .append("\n")
-                }
-                if (HVerticalViewPager.filterAdCount > 0) {
-                    builder.append("广告过滤: ")
-                        .append(HVerticalViewPager.filterAdCount)
-                        .append("\n")
-                }
-                if (HVerticalViewPager.filterLongVideoCount > 0) {
-                    builder.append("长视频过滤: ")
-                        .append(HVerticalViewPager.filterLongVideoCount)
-                        .append("\n")
-                }
-                if (HVerticalViewPager.filterRecommendedCardsCount > 0) {
-                    builder.append("推荐卡片过滤: ")
-                        .append(HVerticalViewPager.filterRecommendedCardsCount)
-                        .append("\n")
-                }
-                if (HVerticalViewPager.filterRecommendedMerchantsCount > 0) {
-                    builder.append("推荐商家过滤: ")
-                        .append(HVerticalViewPager.filterRecommendedMerchantsCount)
-                        .append("\n")
-                }
-                if (HVerticalViewPager.filterEmptyDescCount > 0) {
-                    builder.append("空文案过滤: ")
-                        .append(HVerticalViewPager.filterEmptyDescCount)
-                        .append("\n")
-                }
-                if (HVerticalViewPager.filterOtherCount > 0) {
-                    builder.append("关键字过滤: ").append(HVerticalViewPager.filterOtherCount)
-                }
-                val msg = builder.toString().trim()
-                if (msg.isEmpty()) {
-                    showToast(view.context, "未过滤视频")
-                } else {
-                    showToast(view.context, msg)
                 }
             }
 

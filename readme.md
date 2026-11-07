@@ -1,4 +1,13 @@
-# FreedomPlus
+# FreedomPlus (Lite 精简版)
+
+> 本分支为精简版，仅保留以下核心功能：
+> 1. 视频/图文/音乐下载
+> 2. 双击视频响应类型（点赞/打开评论区）
+> 3. 清爽模式（隐藏控件、移除贴纸、移除底部控制栏）
+> 4. 全屏沉浸式播放
+> 5. 自动连播（可开关，视频播放完毕后自动切换到下一条，逻辑移植自 douyim/抖仙人）
+>
+> 已移除：表情包/评论区保存、半透明防烧屏、Tab栏自定义隐藏、消息防撤回、视频过滤、弹窗过滤、倍速播放、定时退出、WebDav同步、去插件化等功能。
 
 [![](https://img.shields.io/github/v/release/GangJust/FreedomPlus?display_name=release)](https://github.com/GangJust/FreedomPlus/releases) [![](https://img.shields.io/github/downloads/GangJust/FreedomPlus/total?color=g)]() [![](https://img.shields.io/badge/telegram-freedom%2B-BB4E75)](https://t.me/FreedomPlugin)
 
@@ -12,18 +21,11 @@
 
 ## 功能介绍
 
-- 视频无水印下载
-- 评论区视频/图片保存
-- 表情包保存
-- 首页控件半透明防烧屏
-- 首页清爽模式隐藏大部分控件
-- 顶部Tab栏自定义隐藏
-- 聊天消息防撤回
-- 禁用双击点赞
-- 双击打开评论区
+- 视频无水印下载（支持视频/图文/音乐）
+- 双击视频响应类型（可切换点赞/打开评论区）
+- 清爽模式（长按视频切换，隐藏大部分控件）
 - 全屏沉浸式播放
-- 移除底部加号按钮
-- 视频过滤(直播、广告、长视频、文案关键字等)
+- 自动连播（可开关）：挂载播放器引擎轮询进度，按引擎实例独立判定；视频播放完毕（循环回到片头/停在片尾）后向信息流竖版 ViewPager 合成上滑手势翻到下一条
 
 
 

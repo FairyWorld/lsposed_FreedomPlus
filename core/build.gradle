@@ -65,6 +65,5 @@ dependencies {
     compileOnly(libs.xposed.api)
     compileOnly project(":aweme")
     implementation project(":xpler")
-    implementation project(":webdav")
     implementation project(":ktutils")
 }

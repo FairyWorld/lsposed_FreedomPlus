@@ -1,12 +1,10 @@
 package io.github.fplus.core.hook
 
 import android.app.Activity
-import android.view.MotionEvent
 import androidx.core.view.updatePadding
 import com.freegang.extension.contentView
 import com.freegang.extension.navBarInteractionMode
 import com.freegang.extension.navigationBarHeight
-import com.ss.android.ugc.aweme.live.LivePlayActivity
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
 import io.github.fplus.core.helper.ImmersiveHelper
@@ -22,35 +20,17 @@ class HActivity : BaseHook() {
         return Activity::class.java
     }
 
-    @OnBefore("dispatchTouchEvent")
-    fun dispatchTouchEventBefore(params: MethodParam, event: MotionEvent) {
-        hookBlockRunning(params) {
-            val activity = thisObject as Activity
-            DouYinMain.freeExitHelper?.restart()
-
-            if (activity is FreedomSettingActivity)
-                return
-
-            if (activity is LivePlayActivity)
-                DouYinMain.freeExitHelper?.cancel()
-        }.onFailure {
-            XplerLog.e(it)
-        }
-    }
-
     @OnBefore("onResume")
     fun onResumeBefore(params: MethodParam) {
         hookBlockRunning(params) {
-            val activity = thisObject as Activity
-
-            if (activity is LivePlayActivity) {
-                DouYinMain.freeExitHelper?.cancel()
-            } else {
-                DouYinMain.freeExitHelper?.restart()
+            runCatching {
+                AutoPlayEngine.onActivityResumed(thisObject as Activity)
+            }.onFailure {
+                XplerLog.e(it)
             }
-
-            if (DouYinMain.timerExitHelper?.isPaused == true) {
-                DouYinMain.timerExitHelper?.restart()
+            singleLaunchMain {
+                val activity = thisObject as Activity
+                DouYinMain.selfDisciplineHelper?.onAppForeground(activity)
             }
         }.onFailure {
             XplerLog.e(it)

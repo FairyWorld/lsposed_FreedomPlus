@@ -1,10 +1,7 @@
 package io.github.fplus.core.hook
 
-import android.view.MotionEvent
 import com.freegang.extension.findFieldGetValue
 import com.freegang.extension.findFieldSetValue
-import com.freegang.extension.findMethodInvoke
-import com.freegang.ktutils.app.KToastUtils
 import com.freegang.ktutils.text.KTextUtils
 import com.ss.android.ugc.aweme.common.widget.VerticalViewPager
 import com.ss.android.ugc.aweme.feed.model.Aweme
@@ -13,18 +10,11 @@ import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
 import io.github.fplus.core.helper.DexkitBuilder
 import io.github.xpler.core.XplerLog
-import io.github.xpler.core.hookBlockRunning
 import io.github.xpler.core.hookClass
 import io.github.xpler.core.lparam
-import io.github.xpler.core.proxy.MethodParam
-import io.github.xpler.core.thisView
 
 class HVerticalViewPager : BaseHook() {
     companion object {
-        @get:Synchronized
-        @set:Synchronized
-        var currentAweme: Aweme? = null
-
         var isFilterLive = false
         var isFilterImage = false
         var isFilterAd = false
@@ -32,103 +22,43 @@ class HVerticalViewPager : BaseHook() {
         var isFilterRecommendedCards = false
         var isFilterRecommendedMerchants = false
         var isFilterEmptyDesc = false
-
-        var filterLiveCount = 0
-        var filterImageCount = 0
-        var filterAdCount = 0
-        var filterLongVideoCount = 0
-        var filterOtherCount = 0
-        var filterRecommendedCardsCount = 0
-        var filterRecommendedMerchantsCount = 0
-        var filterEmptyDescCount = 0
     }
 
     private val config get() = ConfigV1.get()
 
-    //
-    private val filterKeywordsAndTypes by lazy {
-        config.videoFilterKeywords
+    private val filterKeywordsAndTypes: Set<String>
+        get() = config.videoFilterKeywords
             .replace("，", ",")
             .replace("\\s".toRegex(), "")
             .removePrefix(",").removeSuffix(",")
             .split(",")
+            .filter { it.isNotEmpty() }
             .toSet()
-    }
 
-    private val keywordsRegex by lazy {
-        filterKeywordsAndTypes
+    private val keywordsRegex: Regex
+        get() = filterKeywordsAndTypes
             .filter { !config.videoFilterTypes.contains(it) }
             .joinToString("|")
             .replace("\\|+".toRegex(), "|")
             .toRegex()
-    }
-
-    private var durationRunnable: Runnable? = null
 
     override fun setTargetClass(): Class<*> {
         return VerticalViewPager::class.java
     }
 
-    @OnAfter("onInterceptTouchEvent")
-    fun onInterceptTouchEvent(params: MethodParam, event: MotionEvent) {
-        longVideoJudge(params, event)
-    }
-
-    private fun longVideoJudge(params: MethodParam, event: MotionEvent) {
-        hookBlockRunning(params) {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    val adapter = thisObject?.findMethodInvoke<Any> { name("getAdapter") } ?: return
-                    val currentItem = thisObject?.findMethodInvoke<Int> { name("getCurrentItem") } ?: return
-                    currentAweme = adapter.findMethodInvoke<Aweme>(currentItem) {
-                        returnType(Aweme::class.java)
-                        parameterTypes(listOf(Int::class.java))
-                    }
-
-                    //
-                    if (config.isLongtimeVideoToast) {
-                        durationRunnable?.run {
-                            handler.removeCallbacks(this)
-                            durationRunnable = null
-                        }
-                        durationRunnable = Runnable {
-                            //
-                            val delayItem = thisObject?.findMethodInvoke<Int> { name("getCurrentItem") } ?: return@Runnable
-                            if (delayItem == currentItem) {
-                                return@Runnable
-                            }
-
-                            //
-                            val delayAweme = adapter.findMethodInvoke<Aweme>(delayItem) {
-                                returnType(Aweme::class.java)
-                                parameterTypes(listOf(Int::class.java))
-                            }
-                            val duration = delayAweme?.duration ?: 0
-                            if (duration >= 1000 * 60 * 10) {
-                                val minute = duration / 1000 / 60
-                                val second = duration / 1000 % 60
-                                KToastUtils.show(thisView.context, "请注意, 本条视频时长${minute}分${second}秒!")
-                            }
-                        }
-                        handler.postDelayed(durationRunnable!!, 3000L)
-                    }
-                }
-            }
-        }.onFailure {
-            XplerLog.e(it)
-        }
-    }
-
+    @Suppress("UNCHECKED_CAST")
     private fun filterAwemeList(items: List<Aweme>): List<Aweme> {
         resetFilter()
         val awemes = mutableListOf<Aweme>()
         for (item in items) {
-            val aweme = needAweme(item) ?: continue
-            awemes.add(aweme)
+            needAweme(item) ?: continue
+            awemes.add(item)
         }
+        XplerLog.d("VideoFilter: 推荐 ${items.size} -> ${awemes.size}, live=$isFilterLive ad=$isFilterAd image=$isFilterImage")
         return awemes
     }
 
+    @Suppress("UNCHECKED_CAST")
     private fun filterFollowFeedList(items: List<FollowFeed>): List<FollowFeed> {
         resetFilter()
         val followFeeds = mutableListOf<FollowFeed>()
@@ -136,84 +66,54 @@ class HVerticalViewPager : BaseHook() {
             needAweme(item.aweme) ?: continue
             followFeeds.add(item)
         }
-
+        XplerLog.d("VideoFilter: 关注 ${items.size} -> ${followFeeds.size}")
         return followFeeds
     }
 
     private fun resetFilter() {
+        isFilterLive = false
+        isFilterImage = false
+        isFilterAd = false
+        isFilterLongVideo = false
+        isFilterRecommendedCards = false
+        isFilterRecommendedMerchants = false
+        isFilterEmptyDesc = false
         for (s in filterKeywordsAndTypes) {
-            if ("直播" == s) {
-                HVerticalViewPager.isFilterLive = true
-            }
-            if ("图文" == s) {
-                HVerticalViewPager.isFilterImage = true
-            }
-            if ("广告" == s) {
-                HVerticalViewPager.isFilterAd = true
-            }
-            if ("长视频" == s) {
-                HVerticalViewPager.isFilterLongVideo = true
-            }
-            if ("推荐卡片" == s) {  // awemeType=145, desc=null [热门特效/认识的人]
-                HVerticalViewPager.isFilterRecommendedCards = true
-            }
-            if ("推荐商家" == s) {  // awemeType=140, desc=null
-                HVerticalViewPager.isFilterRecommendedMerchants = true
-            }
-            if ("空文案" == s) {  // desc=null
-                HVerticalViewPager.isFilterEmptyDesc = true
+            when (s) {
+                "直播" -> isFilterLive = true
+                "图文" -> isFilterImage = true
+                "广告" -> isFilterAd = true
+                "长视频" -> isFilterLongVideo = true
+                "推荐卡片" -> isFilterRecommendedCards = true
+                "推荐商家" -> isFilterRecommendedMerchants = true
+                "空文案" -> isFilterEmptyDesc = true
             }
         }
     }
 
     private fun needAweme(aweme: Aweme): Aweme? {
-        return when {
-            HVerticalViewPager.isFilterLive && aweme.isLive -> {
-                HVerticalViewPager.filterLiveCount += 1
-                null
+        return runCatching {
+            when {
+                isFilterLive && aweme.isLive -> null
+                isFilterImage && aweme.isMultiImage -> null
+                isFilterAd && aweme.isAd -> null
+                isFilterLongVideo && aweme.isCopyRightLongVideo -> null
+                isFilterRecommendedCards && aweme.awemeType == 145 -> null
+                isFilterRecommendedMerchants && aweme.awemeType == 140 -> null
+                isFilterEmptyDesc && KTextUtils.isEmpty(aweme.desc) -> null
+                keywordsRegex.pattern.trim().isNotEmpty()
+                        && KTextUtils.get(aweme.desc).contains(keywordsRegex) -> null
+                else -> aweme
             }
-
-            HVerticalViewPager.isFilterImage && aweme.isMultiImage -> {
-                HVerticalViewPager.filterImageCount += 1
-                null
-            }
-
-            HVerticalViewPager.isFilterAd && aweme.isAd -> {
-                HVerticalViewPager.filterAdCount += 1
-                null
-            }
-
-            HVerticalViewPager.isFilterLongVideo && aweme.isCopyRightLongVideo -> {
-                HVerticalViewPager.filterLongVideoCount += 1
-                null
-            }
-
-            HVerticalViewPager.isFilterRecommendedCards && aweme.awemeType == 145 -> {
-                HVerticalViewPager.filterRecommendedCardsCount += 1
-                null
-            }
-
-            HVerticalViewPager.isFilterRecommendedMerchants && aweme.awemeType == 140 -> {
-                HVerticalViewPager.filterRecommendedMerchantsCount += 1
-                null
-            }
-
-            HVerticalViewPager.isFilterEmptyDesc && KTextUtils.isEmpty(aweme.desc) -> {
-                HVerticalViewPager.filterEmptyDescCount += 1
-                null
-            }
-
-            keywordsRegex.pattern.trim().isNotEmpty()
-                    && KTextUtils.get(aweme.desc).contains(keywordsRegex) -> {
-                HVerticalViewPager.filterOtherCount += 1
-                null
-            }
-
-            else -> aweme
+        }.getOrElse {
+            XplerLog.e("VideoFilter: needAweme error: ${it.message}")
+            aweme
         }
     }
 
     override fun onInit() {
+        XplerLog.d("VideoFilter: onInit recommend=${DexkitBuilder.recommendFeedFetchPresenterClazz != null} follow=${DexkitBuilder.fullFeedFollowFetchPresenterClazz != null}")
+
         DexkitBuilder.recommendFeedFetchPresenterClazz?.runCatching {
             lparam.hookClass(this)
                 .method("onSuccess") {
@@ -222,18 +122,24 @@ class HVerticalViewPager : BaseHook() {
 
                         val mModel = thisObject?.findFieldGetValue<Any> { name("mModel") }
                         val mData = mModel?.findFieldGetValue<Any> { name("mData") }
-                        if (mData?.javaClass?.name?.contains("FeedItemList") == true) {
-                            val items = mData.findFieldGetValue<List<Aweme>> { name("items") } ?: emptyList()
-                            if (items.size < 3) return@onBefore
+                        XplerLog.d("VideoFilter: 推荐onSuccess mData=${mData?.javaClass?.simpleName}")
 
-                            mData.findFieldSetValue(filterAwemeList(items)) { name("items") }
-                            // val array = items.map { it.sortString() }.toTypedArray()
-                            // XplerLog.tagD(TAG, arrayOf("推荐视频列表", array.joinToString("\n")))
+                        if (mData != null) {
+                            val items = mData.findFieldGetValue<List<Aweme>> { name("items") }
+                                ?: mData.findFieldGetValue<List<Aweme>> { name("mItems") }
+                                ?: mData.findFieldGetValue<List<Aweme>> { name("list") }
+                                ?: emptyList()
+
+                            if (items.isNotEmpty()) {
+                                mData.findFieldSetValue(filterAwemeList(items)) { name("items") }
+                            } else {
+                                XplerLog.d("VideoFilter: 推荐列表为空, 尝试字段: items/mItems/list")
+                            }
                         }
                     }
                 }
         }?.onFailure {
-            XplerLog.e(it)
+            XplerLog.e("VideoFilter: 推荐Hook失败: ${it.message}")
         }
 
         DexkitBuilder.fullFeedFollowFetchPresenterClazz?.runCatching {
@@ -244,18 +150,22 @@ class HVerticalViewPager : BaseHook() {
 
                         val mModel = thisObject?.findFieldGetValue<Any> { name("mModel") }
                         val mData = mModel?.findFieldGetValue<Any> { name("mData") }
-                        if (mData?.javaClass?.name?.contains("FollowFeedList") == true) {
-                            val mItems = mData.findFieldGetValue<List<FollowFeed>> { name("mItems") } ?: emptyList()
-                            if (mItems.size < 3) return@onBefore
+                        XplerLog.d("VideoFilter: 关注onSuccess mData=${mData?.javaClass?.simpleName}")
 
-                            mData.findFieldSetValue(filterFollowFeedList(mItems)) { name("mItems") }
-                            // val array = mItems.map { it.aweme.sortString() }.toTypedArray()
-                            // XplerLog.tagD(TAG, arrayOf("关注视频列表", array.joinToString("\n")))
+                        if (mData != null) {
+                            val mItems = mData.findFieldGetValue<List<FollowFeed>> { name("mItems") }
+                                ?: mData.findFieldGetValue<List<FollowFeed>> { name("items") }
+                                ?: mData.findFieldGetValue<List<FollowFeed>> { name("list") }
+                                ?: emptyList()
+
+                            if (mItems.isNotEmpty()) {
+                                mData.findFieldSetValue(filterFollowFeedList(mItems)) { name("mItems") }
+                            }
                         }
                     }
                 }
         }?.onFailure {
-            XplerLog.e(it)
+            XplerLog.e("VideoFilter: 关注Hook失败: ${it.message}")
         }
     }
 }

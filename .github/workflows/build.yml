@@ -1,0 +1,134 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ master, main, lite ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'readme.md'
+  pull_request:
+    branches: [ master, main, lite ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        type: choice
+        default: 'debug'
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build APK
+
+    steps:
+      - name: Checkout repo with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      - name: Grant gradlew permission
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug'
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Setup Release Signing
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release'
+        run: |
+          cat > init.gradle << 'GRADLE'
+          gradle.projectsLoaded {
+            rootProject.allprojects { project ->
+              project.afterEvaluate {
+                if (project.plugins.hasPlugin('com.android.application')) {
+                  def keystoreFile = rootProject.file('keystore.jks')
+                  def ksPass = System.getenv('KEYSTORE_PASSWORD')
+                  if (keystoreFile.exists() && ksPass) {
+                    project.android {
+                      signingConfigs {
+                        ci {
+                          storeFile keystoreFile
+                          storePassword ksPass
+                          keyAlias System.getenv('KEY_ALIAS') ?: 'key0'
+                          keyPassword System.getenv('KEY_PASSWORD') ?: ksPass
+                        }
+                      }
+                      buildTypes {
+                        release {
+                          signingConfig signingConfigs.ci
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          GRADLE
+          echo Signing config generated
+
+      - name: Build Release APK
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --stacktrace --init-script init.gradle
+
+      - name: List artifacts
+        if: always()
+        run: |
+          echo '## APK artifacts' >> $GITHUB_STEP_SUMMARY
+          find . -type f -path '*/build/outputs/apk/*/*.apk' 2>/dev/null | while read f; do
+            size=$(du -h "$f" | cut -f1)
+            echo "- \`$f\` ($size)" >> $GITHUB_STEP_SUMMARY
+          done
+          if find . -type f -path '*/build/outputs/mapping/*/mapping.txt' 2>/dev/null | grep -q .; then
+            echo '## Mapping files' >> $GITHUB_STEP_SUMMARY
+            find . -type f -path '*/build/outputs/mapping/*/mapping.txt' 2>/dev/null | while read f; do
+              echo "- \`$f\`" >> $GITHUB_STEP_SUMMARY
+            done
+          fi
+
+      - name: Upload Debug APK
+        if: (github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug') && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreedomPlus-Debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+      - name: Upload Release APK
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreedomPlus-Release
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 90
+
+      - name: Upload Mapping
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreedomPlus-Mapping
+          path: app/build/outputs/mapping/release/mapping.txt
+          retention-days: 90

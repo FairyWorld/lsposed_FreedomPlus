@@ -27,12 +27,6 @@ class HMainBottomTabView : BaseHook() {
                 return
             }
 
-            // 底部导航栏透明度
-            if (config.isTranslucent) {
-                val alphaValue = config.translucentValue[3] / 100f
-                thisViewGroup.parentView?.alpha = alphaValue
-            }
-
             // 底部导航栏全局沉浸式
             if (config.isImmersive) {
                 thisViewGroup.parentView?.background = ColorDrawable(Color.TRANSPARENT)

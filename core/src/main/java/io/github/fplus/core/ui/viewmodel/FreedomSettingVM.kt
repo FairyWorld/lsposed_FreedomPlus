@@ -11,16 +11,13 @@ import com.freegang.extension.appVersionName
 import com.freegang.extension.isEmpty
 import com.freegang.extension.readAssetsAsText
 import com.freegang.ktutils.app.KAppUtils
-import com.freegang.ktutils.net.KUrlUtils
 import io.github.fplus.core.config.ConfigV1
 import io.github.fplus.core.config.Version
 import io.github.fplus.core.config.VersionConfig
-import io.github.webdav.WebDav
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.IOException
 
 class FreedomSettingVM(application: Application) : AndroidViewModel(application) {
     val app: Application get() = getApplication()
@@ -46,29 +43,8 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _videoCoding = MutableLiveData("")
     val videoCoding: LiveData<String> = _videoCoding
 
-    private var _isEmojiDownload = MutableLiveData(false)
-    val isEmoji: LiveData<Boolean> = _isEmojiDownload
-
     private var _vibrate = MutableLiveData(false)
     val isVibrate: LiveData<Boolean> = _vibrate
-
-    private var _isTranslucent = MutableLiveData(false)
-    val isTranslucent: LiveData<Boolean> = _isTranslucent
-
-    private var _translucentValue = MutableLiveData(listOf(50, 50, 50, 50))
-    val translucentValue: LiveData<List<Int>> = _translucentValue
-
-    private var _isRemoveSticker = MutableLiveData(false)
-    val isRemoveSticker: LiveData<Boolean> = _isRemoveSticker
-
-    private var _isRemoveBottomCtrlBar = MutableLiveData(false)
-    val isRemoveBottomCtrlBar: LiveData<Boolean> = _isRemoveBottomCtrlBar
-
-    private var _isPreventRecalled = MutableLiveData(false)
-    val isPreventRecalled: LiveData<Boolean> = _isPreventRecalled
-
-    private var _preventRecalledOtherSetting = MutableLiveData(listOf(false))
-    val preventRecalledOtherSetting: LiveData<List<Boolean>> = _preventRecalledOtherSetting
 
     private var _isDoubleClickType = MutableLiveData(false)
     val isDoubleClickType: LiveData<Boolean> = _isDoubleClickType
@@ -76,41 +52,8 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _doubleClickType = MutableLiveData(2)
     val doubleClickType: LiveData<Int> = _doubleClickType
 
-    private var _isLongtimeVideoToast = MutableLiveData(false)
-    val isLongtimeVideoToast: LiveData<Boolean> = _isLongtimeVideoToast
-
-    private var _isHideTopTab = MutableLiveData(false)
-    val isHideTopTab: LiveData<Boolean> = _isHideTopTab
-
-    private var _hideTopTabKeywords = MutableLiveData("")
-    val hideTopTabKeywords: LiveData<String> = _hideTopTabKeywords
-
-    private var _isHideBottomTab = MutableLiveData(false)
-    val isHideBottomTab: LiveData<Boolean> = _isHideBottomTab
-
-    private var _hideBottomTabKeywords = MutableLiveData("")
-    val hideBottomTabKeywords: LiveData<String> = _hideBottomTabKeywords
-
-    private var _isHidePhotoButton = MutableLiveData(false)
-    val isHidePhotoButton: LiveData<Boolean> = _isHidePhotoButton
-
-    private var _photoButtonType = MutableLiveData(2)
-    val photoButtonType: LiveData<Int> = _photoButtonType
-
-    private var _isPreventAccidentalTouch = MutableLiveData(false)
-    val isPreventAccidentalTouch: LiveData<Boolean> = _isPreventAccidentalTouch
-
-    private var _isVideoOptionBarFilter = MutableLiveData(false)
-    val isVideoOptionBarFilter: LiveData<Boolean> = _isVideoOptionBarFilter
-
-    private var _videoOptionBarFilterKeywords = MutableLiveData("")
-    val videoOptionBarFilterKeywords: LiveData<String> = _videoOptionBarFilterKeywords
-
-    private var _isVideoFilter = MutableLiveData(false)
-    val isVideoFilter: LiveData<Boolean> = _isVideoFilter
-
-    private var _videoFilterKeywords = MutableLiveData("")
-    val videoFilterKeywords: LiveData<String> = _videoFilterKeywords
+    private var _isNeatMode = MutableLiveData(false)
+    val isNeatMode: LiveData<Boolean> = _isNeatMode
 
     private var _isDialogFilter = MutableLiveData(false)
     val isDialogFilter: LiveData<Boolean> = _isDialogFilter
@@ -121,17 +64,11 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _dialogFilterKeywords = MutableLiveData("")
     val dialogFilterKeywords: LiveData<String> = _dialogFilterKeywords
 
-    private var _isNeatMode = MutableLiveData(false)
-    val isNeatMode: LiveData<Boolean> = _isNeatMode
+    private var _isVideoFilter = MutableLiveData(false)
+    val isVideoFilter: LiveData<Boolean> = _isVideoFilter
 
-    private var _isAutoPlay = MutableLiveData(false)
-    val isAutoPlay: LiveData<Boolean> = _isAutoPlay
-
-    private var _addAutoPlayButton = MutableLiveData(false)
-    val addAutoPlayButton: LiveData<Boolean> = _addAutoPlayButton
-
-    private var _defaultAutoPlay = MutableLiveData(false)
-    val defaultAutoPlay: LiveData<Boolean> = _defaultAutoPlay
+    private var _videoFilterKeywords = MutableLiveData("")
+    val videoFilterKeywords: LiveData<String> = _videoFilterKeywords
 
     private var _isImmersive = MutableLiveData(false)
     val isImmersive: LiveData<Boolean> = _isImmersive
@@ -142,42 +79,17 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _longPressMode = MutableLiveData(false)
     val longPressMode: LiveData<Boolean> = _longPressMode
 
-    private var _isCommentColorMode = MutableLiveData(false)
-    val isCommentColorMode: LiveData<Boolean> = _isCommentColorMode
+    private var _isAutoPlay = MutableLiveData(false)
+    val isAutoPlay: LiveData<Boolean> = _isAutoPlay
 
-    private var _commentColorMode = MutableLiveData(0)
-    val commentColorMode: LiveData<Int> = _commentColorMode
+    private var _isSelfDiscipline = MutableLiveData(false)
+    val isSelfDiscipline: LiveData<Boolean> = _isSelfDiscipline
 
-    private var _isWebDav = MutableLiveData(false)
-    val isWebDav: LiveData<Boolean> = _isWebDav
+    private var _selfDisciplineValue = MutableLiveData(listOf(120, 30))
+    val selfDisciplineValue: LiveData<List<Int>> = _selfDisciplineValue
 
-    private var _webDavHost = MutableLiveData("")
-    val webDavHost: LiveData<String> = _webDavHost
-
-    private var _webDavUsername = MutableLiveData("")
-    val webDavUsername: LiveData<String> = _webDavUsername
-
-    private var _webDavPassword = MutableLiveData("")
-    val webDavPassword: LiveData<String> = _webDavPassword
-
-    private var _webDavHistory = MutableLiveData(emptyList<WebDav.Config>())
-    val webDavHistory: LiveData<List<WebDav.Config>> = _webDavHistory
-
-    private var _isTimedExit = MutableLiveData(false)
-    val isTimedExit: LiveData<Boolean> = _isTimedExit
-
-    private var _timedShutdownValue = MutableLiveData(listOf(10, 3))
-    val timedShutdownValue: LiveData<List<Int>> = _timedShutdownValue
-
-    private var _keepAppBackend = MutableLiveData(false)
-    val keepAppBackend: LiveData<Boolean> = _keepAppBackend
-
-    private var _isCrashTolerance = MutableLiveData(false)
-    val isCrashTolerance: LiveData<Boolean> = _isCrashTolerance
-
-    private var _isDisablePlugin = MutableLiveData(false)
-    val isDisablePlugin: LiveData<Boolean> = _isDisablePlugin
-
+    private var _selfDisciplineBlockType = MutableLiveData(0)
+    val selfDisciplineBlockType: LiveData<Int> = _selfDisciplineBlockType
 
     // 检查版本更新
     fun checkVersion() {
@@ -198,48 +110,22 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setNotificationDownload(config.notificationDownload)
             setCopyLinkDownload(config.copyLinkDownload)
             setVideoCoding(config.videoCoding)
-            changeIsEmojiDownload(config.isEmojiDownload)
             setVibrate(config.vibrate)
-            changeIsTranslucent(config.isTranslucent)
-            setTranslucentValue(config.translucentValue)
-            changeIsRemoveSticker(config.isRemoveSticker)
-            changeIsRemoveBottomCtrlBar(config.isRemoveBottomCtrlBar)
-            changeIsPreventRecalled(config.isPreventRecalled)
-            changePreventRecalledOtherSetting(config.preventRecalledOtherSetting)
             changeIsDoubleClickType(config.isDoubleClickType)
             setDoubleClickType(config.doubleClickType)
-            changeIsLongtimeVideoToast(config.isLongtimeVideoToast)
-            changeIsVideoOptionBarFilter(config.isVideoOptionBarFilter)
-            setVideoOptionBarFilterKeywords(config.videoOptionBarFilterKeywords)
-            changeIsVideoFilter(config.isVideoFilter)
-            setVideoFilterKeywords(config.videoFilterKeywords)
+            changeIsNeatMode(config.isNeatMode)
+            setLongPressMode(config.longPressMode)
             changeIsDialogFilter(config.isDialogFilter)
             setDialogDismissTips(config.dialogDismissTips)
             setDialogFilterKeywords(config.dialogFilterKeywords)
-            changeIsNeatMode(config.isNeatMode)
-            setLongPressMode(config.longPressMode)
-            changeIsAutoPlay(config.isAutoPlay)
-            setAddAutoPlayButton(config.addAutoPlayButton)
-            setDefaultAutoPlay(config.defaultAutoPlay)
+            changeIsVideoFilter(config.isVideoFilter)
+            setVideoFilterKeywords(config.videoFilterKeywords)
             changeIsImmersive(config.isImmersive)
             setSystemControllerValue(config.systemControllerValue)
-            changeIsCommentColorMode(config.isCommentColorMode)
-            changeCommentColorMode(config.commentColorMode)
-            changeIsHideTopTab(config.isHideTopTab)
-            setHideTopTabKeywords(config.hideTopTabKeywords)
-            changeIsHideBottomTab(config.isHideBottomTab)
-            setHideBottomTabKeywords(config.hideBottomTabKeywords)
-            changeIsHidePhotoButton(config.isHidePhotoButton)
-            setPhotoButtonType(config.photoButtonType)
-            changeIsPreventAccidentalTouch(config.isPreventAccidentalTouch)
-            changeIsWebDav(config.isWebDav)
-            loadWebHistory()
-            setWebDavConfig(config.webDavConfig)
-            changeIsTimeExit(config.isTimedExit)
-            setTimedShutdownValue(config.timedShutdownValue)
-            setKeepAppBackend(config.keepAppBackend)
-            changeIsCrashTolerance(config.isCrashTolerance)
-            changeIsDisablePlugin(config.isDisablePlugin)
+            changeIsAutoPlay(config.isAutoPlay)
+            changeIsSelfDiscipline(config.isSelfDiscipline)
+            setSelfDisciplineValue(config.selfDisciplineValue)
+            setSelfDisciplineBlockType(config.selfDisciplineBlockType)
         }
     }
 
@@ -273,52 +159,10 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.videoCoding = value
     }
 
-    // 表情包保存
-    fun changeIsEmojiDownload(value: Boolean) {
-        _isEmojiDownload.value = value
-        config.isEmojiDownload = value
-    }
-
     // 震动反馈
     fun setVibrate(value: Boolean) {
         _vibrate.value = value
         config.vibrate = value
-    }
-
-    // 首页控件半透明
-    fun changeIsTranslucent(value: Boolean) {
-        _isTranslucent.value = value
-        config.isTranslucent = value
-    }
-
-    /// 首页控件透明度
-    fun setTranslucentValue(value: List<Int>) {
-        _translucentValue.value = value
-        config.translucentValue = value
-    }
-
-    // 移除悬浮挑战/评论贴纸
-    fun changeIsRemoveSticker(value: Boolean) {
-        _isRemoveSticker.value = value
-        config.isRemoveSticker = value
-    }
-
-    // 移除底部播放控制栏
-    fun changeIsRemoveBottomCtrlBar(value: Boolean) {
-        _isRemoveBottomCtrlBar.value = value
-        config.isRemoveBottomCtrlBar = value
-    }
-
-    // 消息防撤回
-    fun changeIsPreventRecalled(value: Boolean) {
-        _isPreventRecalled.value = value
-        config.isPreventRecalled = value
-    }
-
-    // 防撤回其他设置
-    fun changePreventRecalledOtherSetting(value: List<Boolean>) {
-        _preventRecalledOtherSetting.value = value
-        config.preventRecalledOtherSetting = value
     }
 
     // 是否开启更改双击响应类型
@@ -333,80 +177,10 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.doubleClickType = value
     }
 
-    // 视频时长超过10分钟提示
-    fun changeIsLongtimeVideoToast(value: Boolean) {
-        _isLongtimeVideoToast.value = value
-        config.isLongtimeVideoToast = value
-    }
-
-    // 隐藏顶部tab
-    fun changeIsHideTopTab(value: Boolean) {
-        _isHideTopTab.value = value
-        config.isHideTopTab = value
-    }
-
-    // 隐藏顶部tab包含的关键字, 逗号隔开
-    fun setHideTopTabKeywords(keywords: String) {
-        _hideTopTabKeywords.value = keywords
-        config.hideTopTabKeywords = keywords
-    }
-
-    // 隐藏底部tab
-    fun changeIsHideBottomTab(value: Boolean) {
-        _isHideBottomTab.value = value
-        config.isHideBottomTab = value
-    }
-
-    // 隐藏底部tab包含的关键字, 逗号隔开
-    fun setHideBottomTabKeywords(keywords: String) {
-        _hideBottomTabKeywords.value = keywords
-        config.hideBottomTabKeywords = keywords
-    }
-
-    // 隐藏底部加号按钮
-    fun changeIsHidePhotoButton(value: Boolean) {
-        _isHidePhotoButton.value = value
-        config.isHidePhotoButton = value
-    }
-
-    // 改变底部加号拍摄模式
-    fun setPhotoButtonType(value: Int) {
-        _photoButtonType.value = value
-        config.photoButtonType = value
-    }
-
-    // 手势误触复确认
-    fun changeIsPreventAccidentalTouch(value: Boolean) {
-        _isPreventAccidentalTouch.value = value
-        config.isPreventAccidentalTouch = value
-    }
-
-    // 视频右侧控件栏
-    fun changeIsVideoOptionBarFilter(value: Boolean) {
-        _isVideoOptionBarFilter.value = value
-        config.isVideoOptionBarFilter = value
-    }
-
-    val videoOptionBarFilterTypes get() = config.videoOptionBarFilterTypes
-
-    // 视频过滤关键字
-    fun setVideoOptionBarFilterKeywords(value: String) {
-        _videoOptionBarFilterKeywords.value = value
-        config.videoOptionBarFilterKeywords = value
-    }
-
-    val videoFilterTypes get() = config.videoFilterTypes
-
-    // 视频过滤
-    fun changeIsVideoFilter(value: Boolean) {
-        _isVideoFilter.value = value
-        config.isVideoFilter = value
-    }
-
-    // 视频过滤关键字
-    fun setVideoFilterKeywords(value: String) {
-        _videoFilterKeywords.value = value
-        config.videoFilterKeywords = value
+    // 清爽模式
+    fun changeIsNeatMode(value: Boolean) {
+        _isNeatMode.value = value
+        config.isNeatMode = value
     }
 
     // 弹窗过滤
@@ -427,28 +201,16 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.dialogFilterKeywords = value
     }
 
-    // 清爽模式
-    fun changeIsNeatMode(value: Boolean) {
-        _isNeatMode.value = value
-        config.isNeatMode = value
+    // 视频过滤
+    fun changeIsVideoFilter(value: Boolean) {
+        _isVideoFilter.value = value
+        config.isVideoFilter = value
     }
 
-    // 自动连播
-    fun changeIsAutoPlay(value: Boolean) {
-        _isAutoPlay.value = value
-        config.isAutoPlay = value
-    }
-
-    // 首页添加连播按钮
-    fun setAddAutoPlayButton(value: Boolean) {
-        _addAutoPlayButton.value = value
-        config.addAutoPlayButton = value
-    }
-
-    // 启动时默认开启连播
-    fun setDefaultAutoPlay(value: Boolean) {
-        _defaultAutoPlay.value = value
-        config.defaultAutoPlay = value
+    // 视频过滤关键字
+    fun setVideoFilterKeywords(value: String) {
+        _videoFilterKeywords.value = value
+        config.videoFilterKeywords = value
     }
 
     // 全屏沉浸
@@ -463,121 +225,34 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.systemControllerValue = value
     }
 
+    // 自动连播(自动播放下一条)
+    fun changeIsAutoPlay(value: Boolean) {
+        _isAutoPlay.value = value
+        config.isAutoPlay = value
+    }
+
+    // 自律
+    fun changeIsSelfDiscipline(value: Boolean) {
+        _isSelfDiscipline.value = value
+        config.isSelfDiscipline = value
+    }
+
+    // 自律时长限制(每日分钟, 每小时分钟)
+    fun setSelfDisciplineValue(value: List<Int>) {
+        _selfDisciplineValue.value = value
+        config.selfDisciplineValue = value
+    }
+
+    // 自律拦截方式(0=遮罩, 1=直接退出)
+    fun setSelfDisciplineBlockType(value: Int) {
+        _selfDisciplineBlockType.value = value
+        config.selfDisciplineBlockType = value
+    }
+
     // 清爽模式弹窗响应模式
     fun setLongPressMode(value: Boolean) {
         _longPressMode.value = value
         config.longPressMode = value
-    }
-
-    // 评论区颜色模式
-    fun changeIsCommentColorMode(value: Boolean) {
-        _isCommentColorMode.value = value
-        config.isCommentColorMode = value
-    }
-
-    // 评论区颜色模式
-    fun changeCommentColorMode(value: Int) {
-        _commentColorMode.value = value
-        config.commentColorMode = value
-    }
-
-    // WebDav
-    fun changeIsWebDav(value: Boolean) {
-        _isWebDav.value = value
-        config.isWebDav = value
-    }
-
-    // 初始化WebDav
-    fun testWebDav(block: (Boolean, String) -> Unit) {
-        if (!hasWebDavConfig()) {
-            block.invoke(false, "请填写WebDav配置!")
-            return
-        }
-        if (!KUrlUtils.isValidUrl(webDavHost.value!!)) {
-            block.invoke(false, "WebDav地址格式有误!")
-            return
-        }
-        viewModelScope.launch {
-            try {
-                val webDav = WebDav(webDavHost.value!!, webDavUsername.value!!, webDavPassword.value!!)
-                if (!webDav.exists("Freedom", isDirectory = true)) {
-                    webDav.createDirectory("Freedom")
-                }
-                if (!webDav.exists("数据目录，谨慎删除.txt", "Freedom")) {
-                    webDav.put(
-                        "数据目录，谨慎删除.txt",
-                        "Freedom",
-                        bytes = "该目录为Freedom数据目录，请谨慎删除!!!".toByteArray()
-                    )
-                }
-                block.invoke(true, "WebDav连接成功!")
-            } catch (e: IOException) {
-                e.printStackTrace()
-                block.invoke(false, "WebDav连接失败!")
-            }
-        }
-    }
-
-    // WebDav配置是否存在
-    fun hasWebDavConfig(): Boolean {
-        val host = webDavHost.value ?: return false
-        val username = webDavUsername.value ?: return false
-        val password = webDavPassword.value ?: return false
-        return !(host.isBlank() or username.isBlank() or password.isBlank())
-    }
-
-    // 读取WebDav历史
-    private fun loadWebHistory() {
-        _webDavHistory.value = config.webDavConfigList
-    }
-
-    // 保存WebDav配置
-    fun setWebDavConfig(webDavConfig: WebDav.Config) {
-        _webDavHost.value = webDavConfig.host
-        _webDavUsername.value = webDavConfig.username
-        _webDavPassword.value = webDavConfig.password
-        config.webDavConfig = webDavConfig
-    }
-
-    // 增加WebDav历史
-    fun addWebDavConfig(webDavConfig: WebDav.Config) {
-        config.addWebDavConfig(webDavConfig)
-        loadWebHistory()
-    }
-
-    // 移除WebDav历史
-    fun removeWebDavConfig(webDavConfig: WebDav.Config) {
-        config.removeWebDavConfig(webDavConfig)
-        loadWebHistory()
-    }
-
-    // 定时退出
-    fun changeIsTimeExit(value: Boolean) {
-        _isTimedExit.value = value
-        config.isTimedExit = value
-    }
-
-    // 运行分钟数, 空闲分钟数
-    fun setTimedShutdownValue(value: List<Int>) {
-        _timedShutdownValue.value = value
-        config.timedShutdownValue = value
-    }
-
-    // 保留应用后台
-    fun setKeepAppBackend(value: Boolean) {
-        _keepAppBackend.value = value
-        config.keepAppBackend = value
-    }
-
-    fun changeIsCrashTolerance(value: Boolean) {
-        _isCrashTolerance.value = value
-        config.isCrashTolerance = value
-    }
-
-    // 去插件化
-    fun changeIsDisablePlugin(value: Boolean) {
-        _isDisablePlugin.value = value
-        config.isDisablePlugin = value
     }
 
     // 保存版本信息
